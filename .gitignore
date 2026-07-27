@@ -1,0 +1,29 @@
+# Environment files
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Database and generated files
+*.db
+*.sqlite3
+exports/*
+uploads/*
+
+# Keep empty directories
+!exports/.gitkeep
+!uploads/.gitkeep
