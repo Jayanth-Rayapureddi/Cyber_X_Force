@@ -28,6 +28,16 @@ class DepartmentBase(BaseModel):
 class DepartmentCreate(DepartmentBase):
     pass
 
+class DepartmentUpdate(BaseModel):
+    name: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=100,
+    )
+    description: str | None = None
+    location: str | None = None
+    is_active: bool | None = None
+
 
 class DepartmentResponse(DepartmentBase):
     model_config = ConfigDict(from_attributes=True)
@@ -75,6 +85,45 @@ class AssetBase(BaseModel):
 class AssetCreate(AssetBase):
     pass
 
+class AssetUpdate(BaseModel):
+    asset_code: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=50,
+    )
+    name: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=150,
+    )
+    asset_type: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=100,
+    )
+    description: str | None = None
+    location: str | None = None
+
+    confidentiality: int | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+    integrity: int | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+    availability: int | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+
+    department_id: int | None = None
+    owner_id: int | None = None
+    is_active: bool | None = None
+
 
 class AssetResponse(AssetBase):
     model_config = ConfigDict(from_attributes=True)
@@ -83,3 +132,201 @@ class AssetResponse(AssetBase):
     criticality: str
     is_active: bool
     created_at: datetime
+
+
+    # =========================================================
+# Threat Schemas
+# =========================================================
+
+class ThreatBase(BaseModel):
+    threat_code: str = Field(min_length=2, max_length=50)
+    name: str = Field(min_length=2, max_length=150)
+    category: str = Field(min_length=2, max_length=100)
+    description: str = Field(min_length=5)
+    source: str | None = None
+    default_likelihood: int = Field(default=3, ge=1, le=5)
+
+
+class ThreatCreate(ThreatBase):
+    pass
+
+
+class ThreatUpdate(BaseModel):
+    threat_code: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=50,
+    )
+    name: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=150,
+    )
+    category: str | None = None
+    description: str | None = None
+    source: str | None = None
+    default_likelihood: int | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+    is_active: bool | None = None
+
+
+class ThreatResponse(ThreatBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    is_active: bool
+    created_at: datetime
+
+
+# =========================================================
+# Vulnerability Schemas
+# =========================================================
+
+class VulnerabilityBase(BaseModel):
+    vulnerability_code: str = Field(
+        min_length=2,
+        max_length=50,
+    )
+    name: str = Field(min_length=2, max_length=150)
+    category: str = Field(min_length=2, max_length=100)
+    description: str = Field(min_length=5)
+    severity: str = Field(default="Medium", max_length=30)
+    remediation_guidance: str | None = None
+
+
+class VulnerabilityCreate(VulnerabilityBase):
+    pass
+
+
+class VulnerabilityUpdate(BaseModel):
+    vulnerability_code: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=50,
+    )
+    name: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=150,
+    )
+    category: str | None = None
+    description: str | None = None
+    severity: str | None = None
+    remediation_guidance: str | None = None
+    is_active: bool | None = None
+
+
+class VulnerabilityResponse(VulnerabilityBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    is_active: bool
+    created_at: datetime
+
+
+# =========================================================
+# Risk Assessment Schemas
+# =========================================================
+
+class RiskAssessmentCreate(BaseModel):
+    risk_code: str = Field(min_length=2, max_length=50)
+    title: str = Field(min_length=3, max_length=200)
+    description: str | None = None
+
+    asset_id: int
+    threat_id: int
+    vulnerability_id: int
+
+    likelihood: int = Field(ge=1, le=5)
+    impact: int = Field(ge=1, le=5)
+
+    treatment_option: str = Field(
+        default="Mitigate",
+        pattern="^(Avoid|Mitigate|Transfer|Accept)$",
+    )
+
+    treatment_description: str | None = None
+    risk_owner: str | None = None
+    review_date: datetime | None = None
+
+
+class RiskAssessmentUpdate(BaseModel):
+    title: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=200,
+    )
+    description: str | None = None
+
+    likelihood: int | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+    impact: int | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+
+    treatment_option: str | None = Field(
+        default=None,
+        pattern="^(Avoid|Mitigate|Transfer|Accept)$",
+    )
+
+    treatment_description: str | None = None
+
+    residual_likelihood: int | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+    residual_impact: int | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+
+    status: str | None = Field(
+        default=None,
+        pattern="^(Open|Under Treatment|Accepted|Closed)$",
+    )
+
+    risk_owner: str | None = None
+    review_date: datetime | None = None
+
+
+class RiskAssessmentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    risk_code: str
+    title: str
+    description: str | None
+
+    asset_id: int
+    threat_id: int
+    vulnerability_id: int
+
+    likelihood: int
+    impact: int
+    inherent_score: int
+    inherent_level: str
+
+    treatment_option: str
+    treatment_description: str | None
+
+    residual_likelihood: int | None
+    residual_impact: int | None
+    residual_score: int | None
+    residual_level: str | None
+
+    status: str
+    risk_owner: str | None
+    review_date: datetime | None
+
+    created_at: datetime
+    updated_at: datetime
