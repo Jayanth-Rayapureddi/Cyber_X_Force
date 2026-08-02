@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from datetime import datetime, timezone
 
 import models
 import schemas
@@ -497,3 +498,115 @@ def delete_risk_control_mapping(
 ) -> None:
     db.delete(mapping)
     db.commit()
+
+
+# =========================================================
+# Compliance Dashboard
+# =========================================================
+
+def get_compliance_summary(db: Session):
+    controls = db.scalars(
+        select(models.Control)
+    ).all()
+
+    total = len(controls)
+
+    implemented = sum(
+        c.implementation_status == "Implemented"
+        for c in controls
+    )
+
+    in_progress = sum(
+        c.implementation_status == "In Progress"
+        for c in controls
+    )
+
+    planned = sum(
+        c.implementation_status == "Planned"
+        for c in controls
+    )
+
+    not_started = sum(
+        c.implementation_status == "Not Started"
+        for c in controls
+    )
+
+    not_applicable = sum(
+        c.implementation_status == "Not Applicable"
+        for c in controls
+    )
+
+    if total == 0:
+        compliance = 0
+        average = 0
+
+    else:
+        compliance = round(
+            (implemented / total) * 100,
+            2,
+        )
+
+        average = round(
+            sum(
+                c.implementation_percentage
+                for c in controls
+            )
+            / total,
+            2,
+        )
+
+    return {
+        "total_controls": total,
+        "implemented": implemented,
+        "in_progress": in_progress,
+        "planned": planned,
+        "not_started": not_started,
+        "not_applicable": not_applicable,
+        "overall_compliance_percentage": compliance,
+        "average_implementation_percentage": average,
+    }
+
+
+# =========================================================
+# Overdue Controls
+# =========================================================
+
+def get_overdue_controls(db: Session):
+
+    controls = db.scalars(
+        select(models.Control)
+    ).all()
+
+    now = datetime.utcnow()
+
+    overdue = []
+
+    for control in controls:
+
+        if (
+            control.target_date
+            and control.implementation_status != "Implemented"
+            and control.target_date < now
+        ):
+
+            overdue.append(
+                {
+                    "id": control.id,
+                    "control_code": control.control_code,
+                    "title": control.title,
+                    "owner": control.owner,
+                    "implementation_status": control.implementation_status,
+                    "implementation_percentage": control.implementation_percentage,
+                    "target_date": control.target_date,
+                    "days_overdue": (
+                        now - control.target_date
+                    ).days,
+                }
+            )
+
+    overdue.sort(
+        key=lambda x: x["days_overdue"],
+        reverse=True,
+    )
+
+    return overdue

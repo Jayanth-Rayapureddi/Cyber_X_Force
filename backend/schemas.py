@@ -516,3 +516,45 @@ class RiskControlDetailedResponse(RiskControlResponse):
     risk_title: str
     control_code: str
     control_title: str
+
+
+
+# =========================================================
+# Compliance Dashboard
+# =========================================================
+
+class ComplianceSummaryResponse(BaseModel):
+    total_controls: int
+
+    implemented: int
+    in_progress: int
+    planned: int
+    not_started: int
+    not_applicable: int
+
+    overall_compliance_percentage: float
+    average_implementation_percentage: float
+
+
+
+# =========================================================
+# Overdue Controls
+# =========================================================
+
+class OverdueControlResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+    control_code: str
+    title: str
+
+    owner: str | None
+
+    implementation_status: str
+
+    implementation_percentage: int
+
+    target_date: datetime
+
+    days_overdue: int
