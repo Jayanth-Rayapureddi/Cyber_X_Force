@@ -297,4 +297,120 @@ def seed_initial_data(db: Session) -> None:
                 )
             )
 
+    for control_data in DEFAULT_CONTROLS:
+        existing_control = db.scalar(
+            select(models.Control).where(
+                models.Control.control_code
+                == control_data["control_code"]
+            )
+        )
+
+        if existing_control is None:
+            db.add(
+                models.Control(
+                    **control_data
+                )
+            )
+
     db.commit()
+
+
+
+DEFAULT_CONTROLS = [
+    {
+        "control_code": "A.5.1",
+        "title": "Information Security Policies",
+        "category": "Organisational",
+        "description": (
+            "Establish and maintain approved information "
+            "security policies."
+        ),
+        "guidance": (
+            "Policies should be communicated, reviewed and "
+            "updated at planned intervals."
+        ),
+        "implementation_status": "In Progress",
+        "implementation_percentage": 50,
+        "owner": "Information Security Manager",
+    },
+    {
+        "control_code": "A.5.15",
+        "title": "Access Control",
+        "category": "Organisational",
+        "description": (
+            "Manage physical and logical access according to "
+            "business and information-security requirements."
+        ),
+        "guidance": (
+            "Define access-control rules based on least "
+            "privilege and business need."
+        ),
+        "implementation_status": "Planned",
+        "implementation_percentage": 25,
+        "owner": "IT Operations Manager",
+    },
+    {
+        "control_code": "A.6.3",
+        "title": "Information Security Awareness and Training",
+        "category": "People",
+        "description": (
+            "Provide appropriate information-security "
+            "awareness, education and training."
+        ),
+        "guidance": (
+            "Training should reflect employee roles and "
+            "current threat scenarios."
+        ),
+        "implementation_status": "In Progress",
+        "implementation_percentage": 60,
+        "owner": "Human Resources Manager",
+    },
+    {
+        "control_code": "A.8.8",
+        "title": "Management of Technical Vulnerabilities",
+        "category": "Technological",
+        "description": (
+            "Identify, assess and address technical "
+            "vulnerabilities in information systems."
+        ),
+        "guidance": (
+            "Use vulnerability information, patch management "
+            "and risk-based remediation."
+        ),
+        "implementation_status": "In Progress",
+        "implementation_percentage": 55,
+        "owner": "Cybersecurity Manager",
+    },
+    {
+        "control_code": "A.8.13",
+        "title": "Information Backup",
+        "category": "Technological",
+        "description": (
+            "Maintain and test backups of information, "
+            "software and systems."
+        ),
+        "guidance": (
+            "Backup frequency, retention and restoration "
+            "testing should reflect business needs."
+        ),
+        "implementation_status": "Implemented",
+        "implementation_percentage": 100,
+        "owner": "Infrastructure Manager",
+    },
+    {
+        "control_code": "A.8.16",
+        "title": "Monitoring Activities",
+        "category": "Technological",
+        "description": (
+            "Monitor systems, networks and applications for "
+            "abnormal activity and security events."
+        ),
+        "guidance": (
+            "Define monitoring requirements and review logs "
+            "for suspicious behaviour."
+        ),
+        "implementation_status": "Planned",
+        "implementation_percentage": 20,
+        "owner": "Security Operations Manager",
+    },
+]

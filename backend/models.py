@@ -366,6 +366,93 @@ class Vulnerability(Base):
         back_populates="vulnerability",
     )
 
+class Control(Base):
+    __tablename__ = "controls"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    control_code: Mapped[str] = mapped_column(
+        String(30),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+    )
+
+    category: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    guidance: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    implementation_status: Mapped[str] = mapped_column(
+        String(30),
+        default="Not Started",
+        nullable=False,
+    )
+
+    implementation_percentage: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    owner: Mapped[str | None] = mapped_column(
+        String(150),
+        nullable=True,
+    )
+
+    justification: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    target_date: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
 
 class RiskAssessment(Base):
     __tablename__ = "risk_assessments"

@@ -330,3 +330,104 @@ class RiskAssessmentResponse(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+
+
+# =========================================================
+# ISO Control Schemas
+# =========================================================
+
+class ControlBase(BaseModel):
+    control_code: str = Field(
+        min_length=2,
+        max_length=30,
+    )
+
+    title: str = Field(
+        min_length=3,
+        max_length=200,
+    )
+
+    category: str = Field(
+        min_length=2,
+        max_length=100,
+    )
+
+    description: str = Field(
+        min_length=5,
+    )
+
+    guidance: str | None = None
+
+    implementation_status: str = Field(
+        default="Not Started",
+        pattern=(
+            "^(Not Started|Planned|In Progress|"
+            "Implemented|Not Applicable)$"
+        ),
+    )
+
+    implementation_percentage: int = Field(
+        default=0,
+        ge=0,
+        le=100,
+    )
+
+    owner: str | None = None
+    justification: str | None = None
+    target_date: datetime | None = None
+
+
+class ControlCreate(ControlBase):
+    pass
+
+
+class ControlUpdate(BaseModel):
+    title: str | None = Field(
+        default=None,
+        min_length=3,
+        max_length=200,
+    )
+
+    category: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=100,
+    )
+
+    description: str | None = Field(
+        default=None,
+        min_length=5,
+    )
+
+    guidance: str | None = None
+
+    implementation_status: str | None = Field(
+        default=None,
+        pattern=(
+            "^(Not Started|Planned|In Progress|"
+            "Implemented|Not Applicable)$"
+        ),
+    )
+
+    implementation_percentage: int | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+    )
+
+    owner: str | None = None
+    justification: str | None = None
+    target_date: datetime | None = None
+    last_reviewed_at: datetime | None = None
+    is_active: bool | None = None
+
+
+class ControlResponse(ControlBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    last_reviewed_at: datetime | None
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime

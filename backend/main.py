@@ -656,3 +656,104 @@ def update_risk(
     db.refresh(risk)
 
     return risk
+
+
+
+# =========================================================
+# ISO Controls
+# =========================================================
+
+@app.get(
+    "/controls",
+    response_model=list[schemas.ControlResponse],
+    tags=["ISO Controls"],
+)
+def list_controls(
+    db: DatabaseSession,
+):
+    return crud.get_controls(db)
+
+
+@app.get(
+    "/controls/{control_id}",
+    response_model=schemas.ControlResponse,
+    tags=["ISO Controls"],
+)
+def read_control(
+    control_id: int,
+    db: DatabaseSession,
+):
+    control = crud.get_control(db, control_id)
+
+    if control is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Control not found.",
+        )
+
+    return control
+
+
+@app.post(
+    "/controls",
+    response_model=schemas.ControlResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["ISO Controls"],
+)
+def create_control(
+    control_data: schemas.ControlCreate,
+    db: DatabaseSession,
+):
+    existing_control = crud.get_control_by_code(
+        db,
+        control_data.control_code,
+    )
+
+    if existing_control:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Control code already exists.",
+        )
+
+    try:
+        return crud.create_control(db, control_data)
+
+    except IntegrityError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Unable to create control.",
+        )
+
+
+@app.put(
+    "/controls/{control_id}",
+    response_model=schemas.ControlResponse,
+    tags=["ISO Controls"],
+)
+def update_control(
+    control_id: int,
+    control_data: schemas.ControlUpdate,
+    db: DatabaseSession,
+):
+    control = crud.get_control(db, control_id)
+
+    if control is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Control not found.",
+        )
+
+    update_values = control_data.model_dump(
+        exclude_unset=True
+    )
+
+    for field, value in update_values.items():
+        setattr(control, field, value)
+
+    db.commit()
+    db.refresh(control)
+
+    return control
+
+
+

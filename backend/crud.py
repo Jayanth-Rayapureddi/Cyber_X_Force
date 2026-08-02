@@ -353,3 +353,54 @@ def create_risk_assessment(
     except IntegrityError:
         db.rollback()
         raise
+
+
+
+# =========================================================
+# ISO Controls
+# =========================================================
+
+def get_controls(
+    db: Session,
+) -> list[models.Control]:
+    statement = select(models.Control).order_by(
+        models.Control.control_code
+    )
+    return list(db.scalars(statement).all())
+
+
+def get_control(
+    db: Session,
+    control_id: int,
+) -> models.Control | None:
+    return db.get(models.Control, control_id)
+
+
+def get_control_by_code(
+    db: Session,
+    control_code: str,
+) -> models.Control | None:
+    statement = select(models.Control).where(
+        models.Control.control_code == control_code
+    )
+    return db.scalar(statement)
+
+
+def create_control(
+    db: Session,
+    control_data: schemas.ControlCreate,
+) -> models.Control:
+    control = models.Control(
+        **control_data.model_dump()
+    )
+
+    db.add(control)
+
+    try:
+        db.commit()
+        db.refresh(control)
+        return control
+
+    except IntegrityError:
+        db.rollback()
+        raise
