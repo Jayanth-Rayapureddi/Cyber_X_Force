@@ -674,3 +674,177 @@ def get_compliance_dashboard(db: Session):
         "category_distribution": category_distribution,
         "top_overdue_controls": overdue_controls,
     }
+
+# =========================================================
+# Generic update helper
+# =========================================================
+
+def _apply_update(db: Session, obj, data):
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(obj, field, value)
+    db.commit()
+    db.refresh(obj)
+    return obj
+
+
+# =========================================================
+# Compliance Assessments
+# =========================================================
+
+def get_compliance_assessments(db: Session):
+    return list(db.scalars(select(models.ComplianceAssessment).order_by(models.ComplianceAssessment.assessment_date.desc())).all())
+
+def get_compliance_assessment(db: Session, assessment_id: int):
+    return db.get(models.ComplianceAssessment, assessment_id)
+
+def get_compliance_assessment_by_code(db: Session, assessment_code: str):
+    return db.scalar(select(models.ComplianceAssessment).where(models.ComplianceAssessment.assessment_code == assessment_code))
+
+def create_compliance_assessment(db: Session, data: schemas.ComplianceAssessmentCreate):
+    obj = models.ComplianceAssessment(**data.model_dump())
+    db.add(obj)
+    try:
+        db.commit(); db.refresh(obj); return obj
+    except IntegrityError:
+        db.rollback(); raise
+
+def update_compliance_assessment(db: Session, obj, data):
+    return _apply_update(db, obj, data)
+
+def delete_compliance_assessment(db: Session, obj):
+    db.delete(obj); db.commit()
+
+
+# =========================================================
+# Evidence
+# =========================================================
+
+def get_evidence_records(db: Session):
+    return list(db.scalars(select(models.Evidence).order_by(models.Evidence.created_at.desc())).all())
+
+def get_evidence(db: Session, evidence_id: int):
+    return db.get(models.Evidence, evidence_id)
+
+def get_evidence_by_code(db: Session, code: str):
+    return db.scalar(select(models.Evidence).where(models.Evidence.evidence_code == code))
+
+def create_evidence(db: Session, data: schemas.EvidenceCreate):
+    obj = models.Evidence(**data.model_dump()); db.add(obj)
+    try:
+        db.commit(); db.refresh(obj); return obj
+    except IntegrityError:
+        db.rollback(); raise
+
+def update_evidence(db: Session, obj, data):
+    return _apply_update(db, obj, data)
+
+def delete_evidence(db: Session, obj):
+    db.delete(obj); db.commit()
+
+
+# =========================================================
+# Audits and Findings
+# =========================================================
+
+def get_audits(db: Session):
+    return list(db.scalars(select(models.Audit).order_by(models.Audit.planned_start_date.desc())).all())
+
+def get_audit(db: Session, audit_id: int):
+    return db.get(models.Audit, audit_id)
+
+def get_audit_by_code(db: Session, code: str):
+    return db.scalar(select(models.Audit).where(models.Audit.audit_code == code))
+
+def create_audit(db: Session, data: schemas.AuditCreate):
+    obj=models.Audit(**data.model_dump()); db.add(obj)
+    try:
+        db.commit(); db.refresh(obj); return obj
+    except IntegrityError:
+        db.rollback(); raise
+
+def update_audit(db: Session, obj, data): return _apply_update(db, obj, data)
+def delete_audit(db: Session, obj): db.delete(obj); db.commit()
+
+def get_audit_findings(db: Session):
+    return list(db.scalars(select(models.AuditFinding).order_by(models.AuditFinding.created_at.desc())).all())
+
+def get_audit_finding(db: Session, finding_id: int): return db.get(models.AuditFinding, finding_id)
+def get_finding_by_code(db: Session, code: str): return db.scalar(select(models.AuditFinding).where(models.AuditFinding.finding_code == code))
+def create_audit_finding(db: Session, data: schemas.AuditFindingCreate):
+    obj=models.AuditFinding(**data.model_dump()); db.add(obj)
+    try:
+        db.commit(); db.refresh(obj); return obj
+    except IntegrityError:
+        db.rollback(); raise
+
+def update_audit_finding(db: Session, obj, data): return _apply_update(db, obj, data)
+def delete_audit_finding(db: Session, obj): db.delete(obj); db.commit()
+
+
+# =========================================================
+# Corrective Actions
+# =========================================================
+
+def get_corrective_actions(db: Session):
+    return list(db.scalars(select(models.CorrectiveAction).order_by(models.CorrectiveAction.target_date)).all())
+
+def get_corrective_action(db: Session, action_id: int): return db.get(models.CorrectiveAction, action_id)
+def get_corrective_action_by_code(db: Session, code: str): return db.scalar(select(models.CorrectiveAction).where(models.CorrectiveAction.action_code == code))
+def create_corrective_action(db: Session, data: schemas.CorrectiveActionCreate):
+    obj=models.CorrectiveAction(**data.model_dump()); db.add(obj)
+    try:
+        db.commit(); db.refresh(obj); return obj
+    except IntegrityError:
+        db.rollback(); raise
+
+def update_corrective_action(db: Session, obj, data): return _apply_update(db, obj, data)
+def delete_corrective_action(db: Session, obj): db.delete(obj); db.commit()
+
+
+# =========================================================
+# Incidents
+# =========================================================
+
+def get_incidents(db: Session):
+    return list(db.scalars(select(models.Incident).order_by(models.Incident.detected_at.desc())).all())
+
+def get_incident(db: Session, incident_id: int): return db.get(models.Incident, incident_id)
+def get_incident_by_code(db: Session, code: str): return db.scalar(select(models.Incident).where(models.Incident.incident_code == code))
+def create_incident(db: Session, data: schemas.IncidentCreate):
+    obj=models.Incident(**data.model_dump()); db.add(obj)
+    try:
+        db.commit(); db.refresh(obj); return obj
+    except IntegrityError:
+        db.rollback(); raise
+
+def update_incident(db: Session, obj, data): return _apply_update(db, obj, data)
+def delete_incident(db: Session, obj): db.delete(obj); db.commit()
+
+def get_incident_actions(db: Session, incident_id: int):
+    return list(db.scalars(select(models.IncidentAction).where(models.IncidentAction.incident_id == incident_id).order_by(models.IncidentAction.performed_at)).all())
+
+def create_incident_action(db: Session, data: schemas.IncidentActionCreate):
+    obj=models.IncidentAction(**data.model_dump()); db.add(obj); db.commit(); db.refresh(obj); return obj
+
+
+# =========================================================
+# Management Dashboard
+# =========================================================
+
+def get_management_dashboard(db: Session):
+    now = datetime.utcnow()
+    assets = db.scalars(select(models.Asset)).all()
+    risks = db.scalars(select(models.RiskAssessment)).all()
+    incidents = db.scalars(select(models.Incident)).all()
+    findings = db.scalars(select(models.AuditFinding)).all()
+    actions = db.scalars(select(models.CorrectiveAction)).all()
+    summary = get_compliance_summary(db)
+    return {
+        "total_assets": len(assets),
+        "total_risks": len(risks),
+        "critical_risks": sum(r.inherent_level == "Critical" and r.status != "Closed" for r in risks),
+        "open_incidents": sum(i.status != "Closed" for i in incidents),
+        "open_audit_findings": sum(f.status != "Closed" for f in findings),
+        "overdue_corrective_actions": sum(a.status not in {"Completed", "Verified", "Cancelled"} and a.target_date < now for a in actions),
+        "compliance_percentage": summary["overall_compliance_percentage"],
+    }

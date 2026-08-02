@@ -48,6 +48,39 @@ services:
       db:
         condition: service_healthy
 
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+
+    container_name: cyber_x_force_frontend
+
+    environment:
+      API_BASE_URL: http://backend:8000
+
+    ports:
+      - "8501:8501"
+
+    volumes:
+      - ./frontend:/app
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
     restart: unless-stopped
 
 volumes:
