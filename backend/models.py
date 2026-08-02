@@ -459,6 +459,16 @@ class Control(Base):
         cascade="all, delete-orphan",
     )
 
+    assessments: Mapped[list["ComplianceAssessment"]] = relationship(
+        back_populates="control",
+        cascade="all, delete-orphan",
+    )
+
+    evidence_records: Mapped[list["Evidence"]] = relationship(
+        back_populates="control",
+        cascade="all, delete-orphan",
+    )
+
 
 class RiskAssessment(Base):
     __tablename__ = "risk_assessments"
@@ -687,3 +697,201 @@ class RiskControl(Base):
     control: Mapped["Control"] = relationship(
         back_populates="risk_mappings",
     )
+
+# =========================================================
+# Compliance Assessments and Evidence
+# =========================================================
+
+class ComplianceAssessment(Base):
+    __tablename__ = "compliance_assessments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    assessment_code: Mapped[str] = mapped_column(
+        String(50), unique=True, nullable=False, index=True
+    )
+    control_id: Mapped[int] = mapped_column(
+        ForeignKey("controls.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    compliance_status: Mapped[str] = mapped_column(
+        String(30), default="Not Assessed", nullable=False
+    )
+    compliance_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    assessor: Mapped[str] = mapped_column(String(150), nullable=False)
+    assessment_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    findings: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommendations: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_review_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    control: Mapped["Control"] = relationship(back_populates="assessments")
+    evidence_records: Mapped[list["Evidence"]] = relationship(
+        back_populates="assessment", cascade="all, delete-orphan"
+    )
+
+
+class Evidence(Base):
+    __tablename__ = "evidence"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    evidence_code: Mapped[str] = mapped_column(
+        String(50), unique=True, nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    evidence_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference_location: Mapped[str] = mapped_column(Text, nullable=False)
+    control_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controls.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    assessment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("compliance_assessments.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    owner: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    verification_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    control: Mapped["Control | None"] = relationship(back_populates="evidence_records")
+    assessment: Mapped["ComplianceAssessment | None"] = relationship(
+        back_populates="evidence_records"
+    )
+
+
+# =========================================================
+# Internal Audits and Corrective Actions
+# =========================================================
+
+class Audit(Base):
+    __tablename__ = "audits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    audit_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    audit_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    lead_auditor: Mapped[str] = mapped_column(String(150), nullable=False)
+    planned_start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    planned_end_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="Planned", nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    findings: Mapped[list["AuditFinding"]] = relationship(
+        back_populates="audit", cascade="all, delete-orphan"
+    )
+
+
+class AuditFinding(Base):
+    __tablename__ = "audit_findings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    finding_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    audit_id: Mapped[int] = mapped_column(
+        ForeignKey("audits.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    control_id: Mapped[int | None] = mapped_column(
+        ForeignKey("controls.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    finding_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    severity: Mapped[str] = mapped_column(String(30), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), default="Open", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    audit: Mapped["Audit"] = relationship(back_populates="findings")
+    corrective_actions: Mapped[list["CorrectiveAction"]] = relationship(
+        back_populates="finding", cascade="all, delete-orphan"
+    )
+
+
+class CorrectiveAction(Base):
+    __tablename__ = "corrective_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    action_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    finding_id: Mapped[int] = mapped_column(
+        ForeignKey("audit_findings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    action_description: Mapped[str] = mapped_column(Text, nullable=False)
+    action_owner: Mapped[str] = mapped_column(String(150), nullable=False)
+    target_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="Open", nullable=False)
+    completion_percentage: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    completion_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    verification_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    finding: Mapped["AuditFinding"] = relationship(back_populates="corrective_actions")
+
+
+# =========================================================
+# Incident Management
+# =========================================================
+
+class Incident(Base):
+    __tablename__ = "incidents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    incident_code: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    category: Mapped[str] = mapped_column(String(100), nullable=False)
+    severity: Mapped[str] = mapped_column(String(30), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    reported_by: Mapped[str] = mapped_column(String(150), nullable=False)
+    assigned_to: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    detected_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="Reported", nullable=False)
+    containment_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lessons_learned: Mapped[str | None] = mapped_column(Text, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    asset: Mapped["Asset | None"] = relationship()
+    actions: Mapped[list["IncidentAction"]] = relationship(
+        back_populates="incident", cascade="all, delete-orphan"
+    )
+
+
+class IncidentAction(Base):
+    __tablename__ = "incident_actions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    incident_id: Mapped[int] = mapped_column(
+        ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    action_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    performed_by: Mapped[str] = mapped_column(String(150), nullable=False)
+    performed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    incident: Mapped["Incident"] = relationship(back_populates="actions")

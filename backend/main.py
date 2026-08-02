@@ -973,3 +973,187 @@ def compliance_dashboard(
     db: DatabaseSession,
 ):
     return crud.get_compliance_dashboard(db)
+
+# =========================================================
+# Compliance Assessments
+# =========================================================
+
+@app.get("/compliance-assessments", response_model=list[schemas.ComplianceAssessmentResponse], tags=["Compliance Assessments"])
+def list_compliance_assessments(db: DatabaseSession): return crud.get_compliance_assessments(db)
+
+@app.get("/compliance-assessments/{assessment_id}", response_model=schemas.ComplianceAssessmentResponse, tags=["Compliance Assessments"])
+def read_compliance_assessment(assessment_id: int, db: DatabaseSession):
+    obj=crud.get_compliance_assessment(db, assessment_id)
+    if obj is None: raise HTTPException(status_code=404, detail="Compliance assessment not found.")
+    return obj
+
+@app.post("/compliance-assessments", response_model=schemas.ComplianceAssessmentResponse, status_code=201, tags=["Compliance Assessments"])
+def create_compliance_assessment(data: schemas.ComplianceAssessmentCreate, db: DatabaseSession):
+    if crud.get_compliance_assessment_by_code(db, data.assessment_code): raise HTTPException(status_code=409, detail="Assessment code already exists.")
+    if crud.get_control(db, data.control_id) is None: raise HTTPException(status_code=400, detail="Selected control does not exist.")
+    return crud.create_compliance_assessment(db, data)
+
+@app.put("/compliance-assessments/{assessment_id}", response_model=schemas.ComplianceAssessmentResponse, tags=["Compliance Assessments"])
+def update_compliance_assessment(assessment_id: int, data: schemas.ComplianceAssessmentUpdate, db: DatabaseSession):
+    obj=crud.get_compliance_assessment(db, assessment_id)
+    if obj is None: raise HTTPException(status_code=404, detail="Compliance assessment not found.")
+    return crud.update_compliance_assessment(db, obj, data)
+
+@app.delete("/compliance-assessments/{assessment_id}", status_code=204, tags=["Compliance Assessments"])
+def delete_compliance_assessment(assessment_id: int, db: DatabaseSession):
+    obj=crud.get_compliance_assessment(db, assessment_id)
+    if obj is None: raise HTTPException(status_code=404, detail="Compliance assessment not found.")
+    crud.delete_compliance_assessment(db, obj); return Response(status_code=204)
+
+
+# =========================================================
+# Evidence
+# =========================================================
+
+@app.get("/evidence", response_model=list[schemas.EvidenceResponse], tags=["Evidence"])
+def list_evidence(db: DatabaseSession): return crud.get_evidence_records(db)
+
+@app.get("/evidence/{evidence_id}", response_model=schemas.EvidenceResponse, tags=["Evidence"])
+def read_evidence(evidence_id: int, db: DatabaseSession):
+    obj=crud.get_evidence(db, evidence_id)
+    if obj is None: raise HTTPException(status_code=404, detail="Evidence not found.")
+    return obj
+
+@app.post("/evidence", response_model=schemas.EvidenceResponse, status_code=201, tags=["Evidence"])
+def create_evidence(data: schemas.EvidenceCreate, db: DatabaseSession):
+    if crud.get_evidence_by_code(db, data.evidence_code): raise HTTPException(status_code=409, detail="Evidence code already exists.")
+    if data.control_id is not None and crud.get_control(db, data.control_id) is None: raise HTTPException(status_code=400, detail="Selected control does not exist.")
+    if data.assessment_id is not None and crud.get_compliance_assessment(db, data.assessment_id) is None: raise HTTPException(status_code=400, detail="Selected assessment does not exist.")
+    return crud.create_evidence(db, data)
+
+@app.put("/evidence/{evidence_id}", response_model=schemas.EvidenceResponse, tags=["Evidence"])
+def update_evidence(evidence_id: int, data: schemas.EvidenceUpdate, db: DatabaseSession):
+    obj=crud.get_evidence(db, evidence_id)
+    if obj is None: raise HTTPException(status_code=404, detail="Evidence not found.")
+    return crud.update_evidence(db, obj, data)
+
+@app.delete("/evidence/{evidence_id}", status_code=204, tags=["Evidence"])
+def delete_evidence(evidence_id: int, db: DatabaseSession):
+    obj=crud.get_evidence(db, evidence_id)
+    if obj is None: raise HTTPException(status_code=404, detail="Evidence not found.")
+    crud.delete_evidence(db, obj); return Response(status_code=204)
+
+
+# =========================================================
+# Audits and Findings
+# =========================================================
+
+@app.get("/audits", response_model=list[schemas.AuditResponse], tags=["Audits"])
+def list_audits(db: DatabaseSession): return crud.get_audits(db)
+@app.get("/audits/{audit_id}", response_model=schemas.AuditResponse, tags=["Audits"])
+def read_audit(audit_id: int, db: DatabaseSession):
+    obj=crud.get_audit(db,audit_id)
+    if obj is None: raise HTTPException(status_code=404, detail="Audit not found.")
+    return obj
+@app.post("/audits", response_model=schemas.AuditResponse, status_code=201, tags=["Audits"])
+def create_audit(data: schemas.AuditCreate, db: DatabaseSession):
+    if crud.get_audit_by_code(db,data.audit_code): raise HTTPException(status_code=409, detail="Audit code already exists.")
+    if data.planned_end_date < data.planned_start_date: raise HTTPException(status_code=400, detail="Audit end date cannot be before start date.")
+    return crud.create_audit(db,data)
+@app.put("/audits/{audit_id}", response_model=schemas.AuditResponse, tags=["Audits"])
+def update_audit(audit_id:int,data:schemas.AuditUpdate,db:DatabaseSession):
+    obj=crud.get_audit(db,audit_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Audit not found.")
+    return crud.update_audit(db,obj,data)
+@app.delete("/audits/{audit_id}",status_code=204,tags=["Audits"])
+def delete_audit(audit_id:int,db:DatabaseSession):
+    obj=crud.get_audit(db,audit_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Audit not found.")
+    crud.delete_audit(db,obj); return Response(status_code=204)
+
+@app.get("/audit-findings",response_model=list[schemas.AuditFindingResponse],tags=["Audit Findings"])
+def list_audit_findings(db:DatabaseSession): return crud.get_audit_findings(db)
+@app.post("/audit-findings",response_model=schemas.AuditFindingResponse,status_code=201,tags=["Audit Findings"])
+def create_audit_finding(data:schemas.AuditFindingCreate,db:DatabaseSession):
+    if crud.get_finding_by_code(db,data.finding_code): raise HTTPException(status_code=409,detail="Finding code already exists.")
+    if crud.get_audit(db,data.audit_id) is None: raise HTTPException(status_code=400,detail="Selected audit does not exist.")
+    if data.control_id is not None and crud.get_control(db,data.control_id) is None: raise HTTPException(status_code=400,detail="Selected control does not exist.")
+    return crud.create_audit_finding(db,data)
+@app.get("/audit-findings/{finding_id}",response_model=schemas.AuditFindingResponse,tags=["Audit Findings"])
+def read_audit_finding(finding_id:int,db:DatabaseSession):
+    obj=crud.get_audit_finding(db,finding_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Audit finding not found.")
+    return obj
+@app.put("/audit-findings/{finding_id}",response_model=schemas.AuditFindingResponse,tags=["Audit Findings"])
+def update_audit_finding(finding_id:int,data:schemas.AuditFindingUpdate,db:DatabaseSession):
+    obj=crud.get_audit_finding(db,finding_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Audit finding not found.")
+    return crud.update_audit_finding(db,obj,data)
+@app.delete("/audit-findings/{finding_id}",status_code=204,tags=["Audit Findings"])
+def delete_audit_finding(finding_id:int,db:DatabaseSession):
+    obj=crud.get_audit_finding(db,finding_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Audit finding not found.")
+    crud.delete_audit_finding(db,obj); return Response(status_code=204)
+
+
+# =========================================================
+# Corrective Actions
+# =========================================================
+
+@app.get("/corrective-actions",response_model=list[schemas.CorrectiveActionResponse],tags=["Corrective Actions"])
+def list_corrective_actions(db:DatabaseSession): return crud.get_corrective_actions(db)
+@app.post("/corrective-actions",response_model=schemas.CorrectiveActionResponse,status_code=201,tags=["Corrective Actions"])
+def create_corrective_action(data:schemas.CorrectiveActionCreate,db:DatabaseSession):
+    if crud.get_corrective_action_by_code(db,data.action_code): raise HTTPException(status_code=409,detail="Action code already exists.")
+    if crud.get_audit_finding(db,data.finding_id) is None: raise HTTPException(status_code=400,detail="Selected audit finding does not exist.")
+    return crud.create_corrective_action(db,data)
+@app.get("/corrective-actions/{action_id}",response_model=schemas.CorrectiveActionResponse,tags=["Corrective Actions"])
+def read_corrective_action(action_id:int,db:DatabaseSession):
+    obj=crud.get_corrective_action(db,action_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Corrective action not found.")
+    return obj
+@app.put("/corrective-actions/{action_id}",response_model=schemas.CorrectiveActionResponse,tags=["Corrective Actions"])
+def update_corrective_action(action_id:int,data:schemas.CorrectiveActionUpdate,db:DatabaseSession):
+    obj=crud.get_corrective_action(db,action_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Corrective action not found.")
+    return crud.update_corrective_action(db,obj,data)
+@app.delete("/corrective-actions/{action_id}",status_code=204,tags=["Corrective Actions"])
+def delete_corrective_action(action_id:int,db:DatabaseSession):
+    obj=crud.get_corrective_action(db,action_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Corrective action not found.")
+    crud.delete_corrective_action(db,obj); return Response(status_code=204)
+
+
+# =========================================================
+# Incidents
+# =========================================================
+
+@app.get("/incidents",response_model=list[schemas.IncidentResponse],tags=["Incidents"])
+def list_incidents(db:DatabaseSession): return crud.get_incidents(db)
+@app.post("/incidents",response_model=schemas.IncidentResponse,status_code=201,tags=["Incidents"])
+def create_incident(data:schemas.IncidentCreate,db:DatabaseSession):
+    if crud.get_incident_by_code(db,data.incident_code): raise HTTPException(status_code=409,detail="Incident code already exists.")
+    if data.asset_id is not None and crud.get_asset(db,data.asset_id) is None: raise HTTPException(status_code=400,detail="Selected asset does not exist.")
+    return crud.create_incident(db,data)
+@app.get("/incidents/{incident_id}",response_model=schemas.IncidentResponse,tags=["Incidents"])
+def read_incident(incident_id:int,db:DatabaseSession):
+    obj=crud.get_incident(db,incident_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Incident not found.")
+    return obj
+@app.put("/incidents/{incident_id}",response_model=schemas.IncidentResponse,tags=["Incidents"])
+def update_incident(incident_id:int,data:schemas.IncidentUpdate,db:DatabaseSession):
+    obj=crud.get_incident(db,incident_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Incident not found.")
+    return crud.update_incident(db,obj,data)
+@app.delete("/incidents/{incident_id}",status_code=204,tags=["Incidents"])
+def delete_incident(incident_id:int,db:DatabaseSession):
+    obj=crud.get_incident(db,incident_id)
+    if obj is None: raise HTTPException(status_code=404,detail="Incident not found.")
+    crud.delete_incident(db,obj); return Response(status_code=204)
+@app.get("/incidents/{incident_id}/actions",response_model=list[schemas.IncidentActionResponse],tags=["Incidents"])
+def list_incident_actions(incident_id:int,db:DatabaseSession):
+    if crud.get_incident(db,incident_id) is None: raise HTTPException(status_code=404,detail="Incident not found.")
+    return crud.get_incident_actions(db,incident_id)
+@app.post("/incident-actions",response_model=schemas.IncidentActionResponse,status_code=201,tags=["Incidents"])
+def create_incident_action(data:schemas.IncidentActionCreate,db:DatabaseSession):
+    if crud.get_incident(db,data.incident_id) is None: raise HTTPException(status_code=400,detail="Selected incident does not exist.")
+    return crud.create_incident_action(db,data)
+
+
+@app.get("/management/dashboard",response_model=schemas.ManagementDashboardResponse,tags=["Management Dashboard"])
+def management_dashboard(db:DatabaseSession): return crud.get_management_dashboard(db)
