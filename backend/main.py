@@ -963,3 +963,13 @@ def overdue_controls(
     db: DatabaseSession,
 ):
     return crud.get_overdue_controls(db)
+
+@app.get(
+    "/compliance/dashboard",
+    response_model=schemas.ComplianceDashboardResponse,
+    tags=["Compliance Dashboard"],
+)
+def compliance_dashboard(
+    db: DatabaseSession,
+):
+    return crud.get_compliance_dashboard(db)
