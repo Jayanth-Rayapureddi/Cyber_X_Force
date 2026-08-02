@@ -404,3 +404,96 @@ def create_control(
     except IntegrityError:
         db.rollback()
         raise
+
+
+# =========================================================
+# Risk-Control Mappings
+# =========================================================
+
+def get_risk_control_mappings(
+    db: Session,
+) -> list[models.RiskControl]:
+    statement = select(models.RiskControl).order_by(
+        models.RiskControl.created_at.desc()
+    )
+
+    return list(db.scalars(statement).all())
+
+
+def get_risk_control_mapping(
+    db: Session,
+    mapping_id: int,
+) -> models.RiskControl | None:
+    return db.get(models.RiskControl, mapping_id)
+
+
+def get_mapping_by_risk_and_control(
+    db: Session,
+    risk_id: int,
+    control_id: int,
+) -> models.RiskControl | None:
+    statement = select(models.RiskControl).where(
+        models.RiskControl.risk_id == risk_id,
+        models.RiskControl.control_id == control_id,
+    )
+
+    return db.scalar(statement)
+
+
+def get_control_mappings_for_risk(
+    db: Session,
+    risk_id: int,
+) -> list[models.RiskControl]:
+    statement = (
+        select(models.RiskControl)
+        .where(models.RiskControl.risk_id == risk_id)
+        .order_by(models.RiskControl.created_at.desc())
+    )
+
+    return list(db.scalars(statement).all())
+
+
+def create_risk_control_mapping(
+    db: Session,
+    mapping_data: schemas.RiskControlCreate,
+) -> models.RiskControl:
+    mapping = models.RiskControl(
+        **mapping_data.model_dump()
+    )
+
+    db.add(mapping)
+
+    try:
+        db.commit()
+        db.refresh(mapping)
+        return mapping
+
+    except IntegrityError:
+        db.rollback()
+        raise
+
+
+def update_risk_control_mapping(
+    db: Session,
+    mapping: models.RiskControl,
+    mapping_data: schemas.RiskControlUpdate,
+) -> models.RiskControl:
+    update_values = mapping_data.model_dump(
+        exclude_unset=True
+    )
+
+    for field, value in update_values.items():
+        setattr(mapping, field, value)
+
+    db.commit()
+    db.refresh(mapping)
+
+    return mapping
+
+
+def delete_risk_control_mapping(
+    db: Session,
+    mapping: models.RiskControl,
+) -> None:
+    db.delete(mapping)
+    db.commit()

@@ -431,3 +431,88 @@ class ControlResponse(ControlBase):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+
+# =========================================================
+# Risk-Control Mapping Schemas
+# =========================================================
+
+class RiskControlCreate(BaseModel):
+    risk_id: int
+    control_id: int
+
+    mapping_justification: str = Field(
+        min_length=5,
+    )
+
+    implementation_status: str = Field(
+        default="Planned",
+        pattern=(
+            "^(Planned|In Progress|Implemented|"
+            "Not Applicable)$"
+        ),
+    )
+
+    effectiveness_rating: int | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+
+    planned_start_date: datetime | None = None
+    target_completion_date: datetime | None = None
+    implemented_at: datetime | None = None
+    notes: str | None = None
+
+
+class RiskControlUpdate(BaseModel):
+    mapping_justification: str | None = Field(
+        default=None,
+        min_length=5,
+    )
+
+    implementation_status: str | None = Field(
+        default=None,
+        pattern=(
+            "^(Planned|In Progress|Implemented|"
+            "Not Applicable)$"
+        ),
+    )
+
+    effectiveness_rating: int | None = Field(
+        default=None,
+        ge=1,
+        le=5,
+    )
+
+    planned_start_date: datetime | None = None
+    target_completion_date: datetime | None = None
+    implemented_at: datetime | None = None
+    notes: str | None = None
+
+
+class RiskControlResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    risk_id: int
+    control_id: int
+
+    mapping_justification: str
+    implementation_status: str
+    effectiveness_rating: int | None
+
+    planned_start_date: datetime | None
+    target_completion_date: datetime | None
+    implemented_at: datetime | None
+    notes: str | None
+
+    created_at: datetime
+    updated_at: datetime
+
+
+class RiskControlDetailedResponse(RiskControlResponse):
+    risk_code: str
+    risk_title: str
+    control_code: str
+    control_title: str

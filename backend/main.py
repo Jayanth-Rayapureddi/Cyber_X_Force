@@ -757,3 +757,182 @@ def update_control(
 
 
 
+# =========================================================
+# Risk-Control Mappings
+# =========================================================
+
+@app.get(
+    "/risk-controls",
+    response_model=list[schemas.RiskControlResponse],
+    tags=["Risk-Control Mapping"],
+)
+def list_risk_control_mappings(
+    db: DatabaseSession,
+):
+    return crud.get_risk_control_mappings(db)
+
+
+@app.get(
+    "/risk-controls/{mapping_id}",
+    response_model=schemas.RiskControlResponse,
+    tags=["Risk-Control Mapping"],
+)
+def read_risk_control_mapping(
+    mapping_id: int,
+    db: DatabaseSession,
+):
+    mapping = crud.get_risk_control_mapping(
+        db,
+        mapping_id,
+    )
+
+    if mapping is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Risk-control mapping not found.",
+        )
+
+    return mapping
+
+
+@app.get(
+    "/risks/{risk_id}/controls",
+    response_model=list[schemas.RiskControlResponse],
+    tags=["Risk-Control Mapping"],
+)
+def list_controls_for_risk(
+    risk_id: int,
+    db: DatabaseSession,
+):
+    risk = crud.get_risk_assessment(db, risk_id)
+
+    if risk is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Risk assessment not found.",
+        )
+
+    return crud.get_control_mappings_for_risk(
+        db,
+        risk_id,
+    )
+
+
+@app.post(
+    "/risk-controls",
+    response_model=schemas.RiskControlResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Risk-Control Mapping"],
+)
+def create_risk_control_mapping(
+    mapping_data: schemas.RiskControlCreate,
+    db: DatabaseSession,
+):
+    risk = crud.get_risk_assessment(
+        db,
+        mapping_data.risk_id,
+    )
+
+    if risk is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected risk assessment does not exist.",
+        )
+
+    control = crud.get_control(
+        db,
+        mapping_data.control_id,
+    )
+
+    if control is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected control does not exist.",
+        )
+
+    existing_mapping = (
+        crud.get_mapping_by_risk_and_control(
+            db,
+            mapping_data.risk_id,
+            mapping_data.control_id,
+        )
+    )
+
+    if existing_mapping:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This control is already mapped "
+                "to the selected risk."
+            ),
+        )
+
+    try:
+        return crud.create_risk_control_mapping(
+            db,
+            mapping_data,
+        )
+
+    except IntegrityError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Unable to create risk-control mapping.",
+        )
+
+
+@app.put(
+    "/risk-controls/{mapping_id}",
+    response_model=schemas.RiskControlResponse,
+    tags=["Risk-Control Mapping"],
+)
+def update_risk_control_mapping(
+    mapping_id: int,
+    mapping_data: schemas.RiskControlUpdate,
+    db: DatabaseSession,
+):
+    mapping = crud.get_risk_control_mapping(
+        db,
+        mapping_id,
+    )
+
+    if mapping is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Risk-control mapping not found.",
+        )
+
+    return crud.update_risk_control_mapping(
+        db,
+        mapping,
+        mapping_data,
+    )
+
+
+@app.delete(
+    "/risk-controls/{mapping_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Risk-Control Mapping"],
+)
+def delete_risk_control_mapping(
+    mapping_id: int,
+    db: DatabaseSession,
+):
+    mapping = crud.get_risk_control_mapping(
+        db,
+        mapping_id,
+    )
+
+    if mapping is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Risk-control mapping not found.",
+        )
+
+    crud.delete_risk_control_mapping(
+        db,
+        mapping,
+    )
+
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT
+    )
