@@ -1,7 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
+from datetime import datetime
 
 import models
 import schemas
@@ -536,14 +536,20 @@ def get_compliance_summary(db: Session):
         for c in controls
     )
 
+    applicable_controls = total - not_applicable
+
     if total == 0:
         compliance = 0
         average = 0
 
     else:
-        compliance = round(
-            (implemented / total) * 100,
-            2,
+        compliance = (
+            round(
+                (implemented / applicable_controls) * 100,
+                2,
+            )
+            if applicable_controls > 0
+            else 0
         )
 
         average = round(
@@ -610,3 +616,61 @@ def get_overdue_controls(db: Session):
     )
 
     return overdue
+
+# =========================================================
+# Compliance Dashboard Analytics
+# =========================================================
+
+def get_compliance_dashboard(db: Session):
+    controls = db.scalars(
+        select(models.Control)
+    ).all()
+
+    summary = get_compliance_summary(db)
+
+    statuses = [
+        "Implemented",
+        "In Progress",
+        "Planned",
+        "Not Started",
+        "Not Applicable",
+    ]
+
+    status_distribution = []
+
+    for status_name in statuses:
+        count = sum(
+            control.implementation_status == status_name
+            for control in controls
+        )
+
+        status_distribution.append(
+            {
+                "status": status_name,
+                "count": count,
+            }
+        )
+
+    category_counts: dict[str, int] = {}
+
+    for control in controls:
+        category_counts[control.category] = (
+            category_counts.get(control.category, 0) + 1
+        )
+
+    category_distribution = [
+        {
+            "category": category,
+            "count": count,
+        }
+        for category, count in sorted(category_counts.items())
+    ]
+
+    overdue_controls = get_overdue_controls(db)[:5]
+
+    return {
+        "summary": summary,
+        "status_distribution": status_distribution,
+        "category_distribution": category_distribution,
+        "top_overdue_controls": overdue_controls,
+    }

@@ -558,3 +558,22 @@ class OverdueControlResponse(BaseModel):
     target_date: datetime
 
     days_overdue: int
+
+    # Compliance Dashboard Analytics
+# =========================================================
+
+class ComplianceStatusItem(BaseModel):
+    status: str
+    count: int
+
+
+class ComplianceCategoryItem(BaseModel):
+    category: str
+    count: int
+
+
+class ComplianceDashboardResponse(BaseModel):
+    summary: ComplianceSummaryResponse
+    status_distribution: list[ComplianceStatusItem]
+    category_distribution: list[ComplianceCategoryItem]
+    top_overdue_controls: list[OverdueControlResponse]
