@@ -243,3 +243,342 @@ class Asset(Base):
     owner: Mapped["User | None"] = relationship(
         back_populates="owned_assets",
     )
+
+
+class Threat(Base):
+    __tablename__ = "threats"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    threat_code: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(150),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    category: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    source: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+    )
+
+    default_likelihood: Mapped[int] = mapped_column(
+        Integer,
+        default=3,
+        nullable=False,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    risks: Mapped[list["RiskAssessment"]] = relationship(
+        back_populates="threat",
+    )
+
+
+class Vulnerability(Base):
+    __tablename__ = "vulnerabilities"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    vulnerability_code: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    name: Mapped[str] = mapped_column(
+        String(150),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    category: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    severity: Mapped[str] = mapped_column(
+        String(30),
+        default="Medium",
+        nullable=False,
+    )
+
+    remediation_guidance: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    risks: Mapped[list["RiskAssessment"]] = relationship(
+        back_populates="vulnerability",
+    )
+
+class Control(Base):
+    __tablename__ = "controls"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    control_code: Mapped[str] = mapped_column(
+        String(30),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+    )
+
+    category: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+    )
+
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    guidance: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    implementation_status: Mapped[str] = mapped_column(
+        String(30),
+        default="Not Started",
+        nullable=False,
+    )
+
+    implementation_percentage: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    owner: Mapped[str | None] = mapped_column(
+        String(150),
+        nullable=True,
+    )
+
+    justification: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    target_date: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class RiskAssessment(Base):
+    __tablename__ = "risk_assessments"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    risk_code: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+    )
+
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    asset_id: Mapped[int] = mapped_column(
+        ForeignKey("assets.id"),
+        nullable=False,
+    )
+
+    threat_id: Mapped[int] = mapped_column(
+        ForeignKey("threats.id"),
+        nullable=False,
+    )
+
+    vulnerability_id: Mapped[int] = mapped_column(
+        ForeignKey("vulnerabilities.id"),
+        nullable=False,
+    )
+
+    likelihood: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    impact: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    inherent_score: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+
+    inherent_level: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+    )
+
+    treatment_option: Mapped[str] = mapped_column(
+        String(30),
+        default="Mitigate",
+        nullable=False,
+    )
+
+    treatment_description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    residual_likelihood: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    residual_impact: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    residual_score: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    residual_level: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(30),
+        default="Open",
+        nullable=False,
+    )
+
+    risk_owner: Mapped[str | None] = mapped_column(
+        String(150),
+        nullable=True,
+    )
+
+    review_date: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    asset: Mapped["Asset"] = relationship()
+    threat: Mapped["Threat"] = relationship(
+        back_populates="risks",
+    )
+    vulnerability: Mapped["Vulnerability"] = relationship(
+        back_populates="risks",
+    )
