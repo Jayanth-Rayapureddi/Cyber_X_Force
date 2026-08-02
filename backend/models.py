@@ -7,6 +7,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -453,6 +454,11 @@ class Control(Base):
         nullable=False,
     )
 
+    risk_mappings: Mapped[list["RiskControl"]] = relationship(
+        back_populates="control",
+        cascade="all, delete-orphan",
+    )
+
 
 class RiskAssessment(Base):
     __tablename__ = "risk_assessments"
@@ -581,4 +587,103 @@ class RiskAssessment(Base):
     )
     vulnerability: Mapped["Vulnerability"] = relationship(
         back_populates="risks",
+    )
+
+    control_mappings: Mapped[list["RiskControl"]] = relationship(
+        back_populates="risk",
+        cascade="all, delete-orphan",
+    )
+
+
+
+class RiskControl(Base):
+    __tablename__ = "risk_controls"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "risk_id",
+            "control_id",
+            name="uq_risk_control_mapping",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    risk_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "risk_assessments.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    control_id: Mapped[int] = mapped_column(
+        ForeignKey(
+            "controls.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+
+    mapping_justification: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+
+    implementation_status: Mapped[str] = mapped_column(
+        String(30),
+        default="Planned",
+        nullable=False,
+    )
+
+    effectiveness_rating: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    planned_start_date: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    target_completion_date: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    implemented_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True,
+    )
+
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    risk: Mapped["RiskAssessment"] = relationship(
+        back_populates="control_mappings",
+    )
+
+    control: Mapped["Control"] = relationship(
+        back_populates="risk_mappings",
     )
