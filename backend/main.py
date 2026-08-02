@@ -936,3 +936,30 @@ def delete_risk_control_mapping(
     return Response(
         status_code=status.HTTP_204_NO_CONTENT
     )
+
+
+
+
+# =========================================================
+# Compliance Dashboard
+# =========================================================
+
+@app.get(
+    "/compliance/summary",
+    response_model=schemas.ComplianceSummaryResponse,
+    tags=["Compliance Dashboard"],
+)
+def compliance_summary(
+    db: DatabaseSession,
+):
+    return crud.get_compliance_summary(db)
+
+@app.get(
+    "/compliance/overdue-controls",
+    response_model=list[schemas.OverdueControlResponse],
+    tags=["Compliance Dashboard"],
+)
+def overdue_controls(
+    db: DatabaseSession,
+):
+    return crud.get_overdue_controls(db)
