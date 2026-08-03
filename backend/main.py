@@ -1,7 +1,11 @@
 from contextlib import asynccontextmanager
 from typing import Annotated
+from pathlib import Path
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status
+
+from fastapi import Depends, FastAPI, HTTPException, Response, status, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -14,6 +18,11 @@ from seed import seed_initial_data
 
 
 DatabaseSession = Annotated[Session, Depends(get_db)]
+
+EVIDENCE_UPLOAD_DIR = Path("/uploads/evidence")
+EVIDENCE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+ALLOWED_EVIDENCE_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".txt", ".csv"}
+MAX_EVIDENCE_FILE_SIZE = 10 * 1024 * 1024
 
 
 @asynccontextmanager
@@ -1011,32 +1020,119 @@ def delete_compliance_assessment(assessment_id: int, db: DatabaseSession):
 # =========================================================
 
 @app.get("/evidence", response_model=list[schemas.EvidenceResponse], tags=["Evidence"])
-def list_evidence(db: DatabaseSession): return crud.get_evidence_records(db)
+def list_evidence(db: DatabaseSession):
+    return crud.get_evidence_records(db)
+
+@app.post("/evidence/upload", response_model=schemas.EvidenceResponse, status_code=status.HTTP_201_CREATED, tags=["Evidence"])
+async def upload_evidence(
+    db: DatabaseSession,
+    evidence_code: str = Form(...),
+    title: str = Form(...),
+    evidence_type: str = Form(...),
+    collected_at: str = Form(...),
+    file: UploadFile = File(...),
+    description: str | None = Form(None),
+    control_id: int | None = Form(None),
+    assessment_id: int | None = Form(None),
+    owner: str | None = Form(None),
+    valid_until: str | None = Form(None),
+    is_verified: bool = Form(False),
+    verification_notes: str | None = Form(None),
+):
+    if crud.get_evidence_by_code(db, evidence_code):
+        raise HTTPException(status_code=409, detail="Evidence code already exists.")
+    if control_id is not None and crud.get_control(db, control_id) is None:
+        raise HTTPException(status_code=400, detail="Selected control does not exist.")
+    if assessment_id is not None and crud.get_compliance_assessment(db, assessment_id) is None:
+        raise HTTPException(status_code=400, detail="Selected assessment does not exist.")
+
+    original_name = Path(file.filename or "evidence").name
+    extension = Path(original_name).suffix.lower()
+    if extension not in ALLOWED_EVIDENCE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Unsupported file type. Allowed: PDF, DOCX, XLS/XLSX, PNG/JPG, TXT and CSV.")
+
+    stored_name = f"{uuid4().hex}{extension}"
+    destination = EVIDENCE_UPLOAD_DIR / stored_name
+    written = 0
+    try:
+        with destination.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                written += len(chunk)
+                if written > MAX_EVIDENCE_FILE_SIZE:
+                    raise HTTPException(status_code=413, detail="File exceeds the 10 MB limit.")
+                output.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+
+    try:
+        data = schemas.EvidenceCreate(
+            evidence_code=evidence_code,
+            title=title,
+            evidence_type=evidence_type,
+            description=description,
+            reference_location=f"/uploads/evidence/{stored_name}",
+            control_id=control_id,
+            assessment_id=assessment_id,
+            owner=owner,
+            collected_at=collected_at,
+            valid_until=valid_until or None,
+            is_verified=is_verified,
+            verification_notes=(f"Original file: {original_name}; Size: {written} bytes" + (f"; {verification_notes}" if verification_notes else "")),
+        )
+        return crud.create_evidence(db, data)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+
+@app.get("/evidence/{evidence_id}/download", tags=["Evidence"])
+def download_evidence(evidence_id: int, db: DatabaseSession):
+    obj = crud.get_evidence(db, evidence_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Evidence not found.")
+    path = EVIDENCE_UPLOAD_DIR / Path(obj.reference_location).name
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Uploaded evidence file not found.")
+    original_name = obj.title + path.suffix
+    if obj.verification_notes and "Original file:" in obj.verification_notes:
+        original_name = obj.verification_notes.split("Original file:", 1)[1].split(";", 1)[0].strip()
+    return FileResponse(path=path, filename=original_name, media_type="application/octet-stream")
 
 @app.get("/evidence/{evidence_id}", response_model=schemas.EvidenceResponse, tags=["Evidence"])
 def read_evidence(evidence_id: int, db: DatabaseSession):
-    obj=crud.get_evidence(db, evidence_id)
-    if obj is None: raise HTTPException(status_code=404, detail="Evidence not found.")
+    obj = crud.get_evidence(db, evidence_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Evidence not found.")
     return obj
 
 @app.post("/evidence", response_model=schemas.EvidenceResponse, status_code=201, tags=["Evidence"])
 def create_evidence(data: schemas.EvidenceCreate, db: DatabaseSession):
-    if crud.get_evidence_by_code(db, data.evidence_code): raise HTTPException(status_code=409, detail="Evidence code already exists.")
-    if data.control_id is not None and crud.get_control(db, data.control_id) is None: raise HTTPException(status_code=400, detail="Selected control does not exist.")
-    if data.assessment_id is not None and crud.get_compliance_assessment(db, data.assessment_id) is None: raise HTTPException(status_code=400, detail="Selected assessment does not exist.")
+    if crud.get_evidence_by_code(db, data.evidence_code):
+        raise HTTPException(status_code=409, detail="Evidence code already exists.")
+    if data.control_id is not None and crud.get_control(db, data.control_id) is None:
+        raise HTTPException(status_code=400, detail="Selected control does not exist.")
+    if data.assessment_id is not None and crud.get_compliance_assessment(db, data.assessment_id) is None:
+        raise HTTPException(status_code=400, detail="Selected assessment does not exist.")
     return crud.create_evidence(db, data)
 
 @app.put("/evidence/{evidence_id}", response_model=schemas.EvidenceResponse, tags=["Evidence"])
 def update_evidence(evidence_id: int, data: schemas.EvidenceUpdate, db: DatabaseSession):
-    obj=crud.get_evidence(db, evidence_id)
-    if obj is None: raise HTTPException(status_code=404, detail="Evidence not found.")
+    obj = crud.get_evidence(db, evidence_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Evidence not found.")
     return crud.update_evidence(db, obj, data)
 
 @app.delete("/evidence/{evidence_id}", status_code=204, tags=["Evidence"])
 def delete_evidence(evidence_id: int, db: DatabaseSession):
-    obj=crud.get_evidence(db, evidence_id)
-    if obj is None: raise HTTPException(status_code=404, detail="Evidence not found.")
-    crud.delete_evidence(db, obj); return Response(status_code=204)
+    obj = crud.get_evidence(db, evidence_id)
+    if obj is None:
+        raise HTTPException(status_code=404, detail="Evidence not found.")
+    path = EVIDENCE_UPLOAD_DIR / Path(obj.reference_location).name
+    crud.delete_evidence(db, obj)
+    path.unlink(missing_ok=True)
+    return Response(status_code=204)
 
 
 # =========================================================

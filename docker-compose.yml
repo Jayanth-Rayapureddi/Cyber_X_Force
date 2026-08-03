@@ -43,6 +43,7 @@ services:
 
     volumes:
       - ./backend:/app
+      - ./uploads/evidence:/uploads/evidence
 
     depends_on:
       db:

@@ -165,6 +165,46 @@ def api_put(path: str, payload: dict[str, Any]) -> Any:
     return api_request("PUT", path, payload)
 
 
+def api_delete(path: str) -> bool:
+    return bool(api_request("DELETE", path))
+
+
+def api_upload_evidence(data: dict[str, Any], uploaded_file) -> Any:
+    try:
+        response = requests.post(
+            f"{API_BASE_URL}/evidence/upload",
+            data=data,
+            files={"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)},
+            timeout=60,
+        )
+        if response.status_code >= 400:
+            detail: Any = response.text
+            try:
+                detail = response.json().get("detail", detail)
+            except ValueError:
+                pass
+            st.error(f"Evidence upload failed: {detail}")
+            return None
+        return response.json()
+    except requests.RequestException as exc:
+        st.error(f"Evidence upload failed: {exc}")
+        return None
+
+
+def download_evidence_file(evidence_id: int) -> tuple[bytes, str] | None:
+    try:
+        response = requests.get(f"{API_BASE_URL}/evidence/{evidence_id}/download", timeout=60)
+        response.raise_for_status()
+        disposition = response.headers.get("content-disposition", "")
+        filename = f"evidence-{evidence_id}"
+        if "filename=" in disposition:
+            filename = disposition.split("filename=", 1)[1].strip().strip('"')
+        return response.content, filename
+    except requests.RequestException as exc:
+        st.error(f"Download failed: {exc}")
+        return None
+
+
 def clean_frame(records: list[dict[str, Any]], preferred: list[str]) -> pd.DataFrame:
     if not records:
         return pd.DataFrame()
@@ -670,79 +710,82 @@ def compliance_page() -> None:
 
 
 def evidence_page() -> None:
-    page_header("Evidence Repository", "Register policies, reports, screenshots and other audit evidence.")
+    page_header("Evidence Repository", "Upload, verify, download and manage ISO/IEC 27001 audit evidence.")
     evidence = api_get("/evidence") or []
     controls = api_get("/controls") or []
     assessments = api_get("/compliance-assessments") or []
 
     verified = sum(bool(item.get("is_verified")) for item in evidence)
     cols = st.columns(3)
-    with cols[0]:
-        kpi("Evidence Records", len(evidence), "Registered evidence items")
-    with cols[1]:
-        kpi("Verified", verified, "Evidence reviewed by an auditor")
-    with cols[2]:
-        kpi("Pending Verification", len(evidence) - verified, "Still awaiting review")
+    with cols[0]: kpi("Evidence Records", len(evidence), "Uploaded and referenced evidence")
+    with cols[1]: kpi("Verified", verified, "Reviewed by an auditor")
+    with cols[2]: kpi("Pending Verification", len(evidence) - verified, "Awaiting review")
 
-    with st.expander("➕ Add evidence metadata"):
-        control_options = {"None": None} | {
-            f"{item['control_code']} — {item['title']}": item["id"]
-            for item in controls
-        }
-        assessment_options = {"None": None} | {
-            item["assessment_code"]: item["id"]
-            for item in assessments
-        }
-        with st.form("evidence_form", clear_on_submit=True):
+    with st.expander("➕ Upload evidence", expanded=not evidence):
+        control_options = {"None": ""} | {f"{item['control_code']} — {item['title']}": str(item["id"]) for item in controls}
+        assessment_options = {"None": ""} | {item["assessment_code"]: str(item["id"]) for item in assessments}
+        with st.form("evidence_upload_form", clear_on_submit=True):
+            uploaded_file = st.file_uploader("Choose evidence file", type=["pdf", "docx", "xlsx", "xls", "png", "jpg", "jpeg", "txt", "csv"], help="Maximum size: 10 MB")
             c1, c2 = st.columns(2)
             evidence_code = c1.text_input("Evidence code", value="EVD-")
             title = c2.text_input("Title")
-            evidence_type = c1.selectbox(
-                "Evidence type",
-                ["Policy", "Procedure", "Report", "Screenshot", "Log", "Certificate", "Spreadsheet", "Other"],
-            )
+            evidence_type = c1.selectbox("Evidence type", ["Policy", "Procedure", "Report", "Screenshot", "Log", "Certificate", "Spreadsheet", "Other"])
             owner = c2.text_input("Owner")
             description = st.text_area("Description")
-            reference_location = st.text_input(
-                "Reference location",
-                placeholder="Local path, SharePoint link, document reference or repository URL",
-            )
             c1, c2 = st.columns(2)
             control_label = c1.selectbox("Related control", list(control_options))
             assessment_label = c2.selectbox("Related assessment", list(assessment_options))
             collected_at = c1.date_input("Collected date", value=date.today())
-            valid_until = c2.date_input("Valid until", value=date.today())
+            has_expiry = c2.checkbox("Evidence has an expiry date")
+            valid_until = c2.date_input("Valid until", value=date.today(), disabled=not has_expiry)
             is_verified = st.checkbox("Verified")
             verification_notes = st.text_area("Verification notes")
-            submitted = st.form_submit_button("Create evidence record", use_container_width=True)
+            submitted = st.form_submit_button("Upload evidence", use_container_width=True)
         if submitted:
-            created = api_post(
-                "/evidence",
-                {
-                    "evidence_code": evidence_code,
-                    "title": title,
-                    "evidence_type": evidence_type,
-                    "description": description or None,
-                    "reference_location": reference_location,
-                    "control_id": control_options[control_label],
-                    "assessment_id": assessment_options[assessment_label],
-                    "owner": owner or None,
-                    "collected_at": dt_value(collected_at),
-                    "valid_until": dt_value(valid_until),
-                    "is_verified": is_verified,
-                    "verification_notes": verification_notes or None,
-                },
-            )
-            if created:
-                st.success("Evidence record created.")
-                st.rerun()
+            if uploaded_file is None:
+                st.error("Select a file before uploading.")
+            elif evidence_code.strip() == "EVD-":
+                st.error("Enter a complete evidence code, for example EVD-001.")
+            elif not title.strip():
+                st.error("Enter an evidence title.")
+            else:
+                created = api_upload_evidence({
+                    "evidence_code": evidence_code.strip(), "title": title.strip(), "evidence_type": evidence_type,
+                    "description": description or "", "control_id": control_options[control_label],
+                    "assessment_id": assessment_options[assessment_label], "owner": owner or "",
+                    "collected_at": dt_value(collected_at), "valid_until": dt_value(valid_until) if has_expiry else "",
+                    "is_verified": str(is_verified).lower(), "verification_notes": verification_notes or "",
+                }, uploaded_file)
+                if created:
+                    st.success("Evidence uploaded successfully.")
+                    st.rerun()
 
-    show_table(
-        evidence,
-        ["evidence_code", "title", "evidence_type", "owner", "control_id", "assessment_id", "collected_at", "valid_until", "is_verified", "reference_location"],
-        "No evidence records have been added.",
-    )
+    search = st.text_input("Search evidence", placeholder="Code, title, type or owner")
+    filtered = evidence
+    if search:
+        token = search.lower()
+        filtered = [item for item in evidence if token in " ".join(str(item.get(key, "")).lower() for key in ["evidence_code", "title", "evidence_type", "owner"])]
+    if not filtered:
+        st.info("No evidence records match your search.")
+        return
 
+    for item in filtered:
+        left, middle, right = st.columns([5, 1.3, 1.1])
+        with left:
+            status_label = "Verified" if item.get("is_verified") else "Pending verification"
+            st.markdown(f"""<div class='section-card'><span class='{badge_class(status_label)}'>{status_label}</span><h3>{item.get('evidence_code', '')} — {item.get('title', '')}</h3><b>Type:</b> {item.get('evidence_type', '')} &nbsp;&nbsp; <b>Owner:</b> {item.get('owner') or 'Unassigned'}<br><span style='opacity:.72'>{item.get('description') or 'No description'}</span></div>""", unsafe_allow_html=True)
+        with middle:
+            downloaded = download_evidence_file(item["id"])
+            if downloaded:
+                content, filename = downloaded
+                st.download_button("⬇ Download", data=content, file_name=filename, key=f"download-{item['id']}", use_container_width=True)
+        with right:
+            if st.button("🗑 Delete", key=f"delete-{item['id']}", use_container_width=True):
+                if api_delete(f"/evidence/{item['id']}"):
+                    st.success("Evidence deleted.")
+                    st.rerun()
+
+    show_table(filtered, ["evidence_code", "title", "evidence_type", "owner", "control_id", "assessment_id", "collected_at", "valid_until", "is_verified"], "No evidence records have been added.")
 
 def audits_page() -> None:
     page_header("Audits and Findings", "Plan internal audits and track non-conformities.")
