@@ -848,3 +848,83 @@ def get_management_dashboard(db: Session):
         "overdue_corrective_actions": sum(a.status not in {"Completed", "Verified", "Cancelled"} and a.target_date < now for a in actions),
         "compliance_percentage": summary["overall_compliance_percentage"],
     }
+
+
+# =========================================================
+# Users, Authentication and Audit Trail
+# =========================================================
+
+def get_user_by_email(db: Session, email: str) -> models.User | None:
+    return db.scalar(select(models.User).where(models.User.email == email.lower().strip()))
+
+
+def get_users(db: Session) -> list[models.User]:
+    return list(db.scalars(select(models.User).order_by(models.User.full_name)).all())
+
+
+def create_user_record(
+    db: Session,
+    user_data: schemas.UserCreate,
+    hashed_password: str,
+) -> models.User:
+    user = models.User(
+        full_name=user_data.full_name,
+        email=str(user_data.email).lower().strip(),
+        hashed_password=hashed_password,
+        role_id=user_data.role_id,
+        department_id=user_data.department_id,
+        is_active=True,
+    )
+    db.add(user)
+    try:
+        db.commit()
+        db.refresh(user)
+        return user
+    except IntegrityError:
+        db.rollback()
+        raise
+
+
+def update_user_record(
+    db: Session,
+    user: models.User,
+    update_values: dict,
+) -> models.User:
+    for field, value in update_values.items():
+        setattr(user, field, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def create_audit_log(
+    db: Session,
+    *,
+    user_id: int | None,
+    user_email: str | None,
+    action: str,
+    resource: str,
+    method: str | None = None,
+    status_code: int | None = None,
+    ip_address: str | None = None,
+    details: str | None = None,
+) -> models.AuditLog:
+    log = models.AuditLog(
+        user_id=user_id,
+        user_email=user_email,
+        action=action,
+        resource=resource,
+        method=method,
+        status_code=status_code,
+        ip_address=ip_address,
+        details=details,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return log
+
+
+def get_audit_logs(db: Session, limit: int = 200) -> list[models.AuditLog]:
+    statement = select(models.AuditLog).order_by(models.AuditLog.created_at.desc()).limit(limit)
+    return list(db.scalars(statement).all())

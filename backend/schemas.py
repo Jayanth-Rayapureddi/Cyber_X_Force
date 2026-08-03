@@ -821,3 +821,52 @@ class ManagementDashboardResponse(BaseModel):
     open_audit_findings: int
     overdue_corrective_actions: int
     compliance_percentage: float
+
+
+# =========================================================
+# Authentication and Audit Trail Schemas
+# =========================================================
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+
+
+class CurrentUserResponse(BaseModel):
+    id: int
+    full_name: str
+    email: EmailStr
+    role_id: int
+    role_name: str
+    department_id: int | None = None
+    is_active: bool
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: CurrentUserResponse
+
+
+class UserUpdate(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=120)
+    email: EmailStr | None = None
+    role_id: int | None = None
+    department_id: int | None = None
+    is_active: bool | None = None
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+class AuditLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    user_id: int | None
+    user_email: str | None
+    action: str
+    resource: str
+    method: str | None
+    status_code: int | None
+    ip_address: str | None
+    details: str | None
+    created_at: datetime

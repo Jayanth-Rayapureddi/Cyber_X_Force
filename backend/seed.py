@@ -1,7 +1,10 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from passlib.context import CryptContext
 
 import models
+
+PASSWORD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 DEFAULT_ROLES = [
@@ -29,6 +32,16 @@ DEFAULT_ROLES = [
         "name": "Executive Viewer",
         "description": "Views management dashboards and reports.",
     },
+]
+
+
+DEFAULT_USERS = [
+    {"full_name": "System Administrator", "email": "admin@cyberxforce.com", "password": "Admin@12345", "role": "Administrator", "department": "Cybersecurity"},
+    {"full_name": "Risk Analyst", "email": "risk@cyberxforce.com", "password": "Risk@12345", "role": "Risk Manager", "department": "Cybersecurity"},
+    {"full_name": "Internal Auditor", "email": "auditor@cyberxforce.com", "password": "Audit@12345", "role": "Internal Auditor", "department": "Quality Assurance"},
+    {"full_name": "Asset Owner", "email": "asset@cyberxforce.com", "password": "Asset@12345", "role": "Asset Owner", "department": "Information Technology"},
+    {"full_name": "Incident Manager", "email": "incident@cyberxforce.com", "password": "Incident@12345", "role": "Incident Manager", "department": "Cybersecurity"},
+    {"full_name": "Executive Viewer", "email": "executive@cyberxforce.com", "password": "Executive@12345", "role": "Executive Viewer", "department": "Executive Management"},
 ]
 
 
@@ -311,6 +324,34 @@ def seed_initial_data(db: Session) -> None:
                     **control_data
                 )
             )
+
+
+    db.flush()
+
+    for user_data in DEFAULT_USERS:
+        existing_user = db.scalar(
+            select(models.User).where(models.User.email == user_data["email"])
+        )
+        if existing_user is not None:
+            continue
+
+        role = db.scalar(select(models.Role).where(models.Role.name == user_data["role"]))
+        department = db.scalar(
+            select(models.Department).where(models.Department.name == user_data["department"])
+        )
+        if role is None:
+            continue
+
+        db.add(
+            models.User(
+                full_name=user_data["full_name"],
+                email=user_data["email"],
+                hashed_password=PASSWORD_CONTEXT.hash(user_data["password"]),
+                role_id=role.id,
+                department_id=department.id if department else None,
+                is_active=True,
+            )
+        )
 
     db.commit()
 

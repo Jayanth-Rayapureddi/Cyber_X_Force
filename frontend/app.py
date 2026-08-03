@@ -1,4 +1,5 @@
 import os
+from io import BytesIO
 from datetime import date, datetime, time
 from typing import Any
 
@@ -7,6 +8,9 @@ import plotly.express as px
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://backend:8000").rstrip("/")
@@ -131,10 +135,15 @@ def api_request(
     payload: dict[str, Any] | None = None,
 ) -> Any:
     try:
+        headers = {}
+        token = st.session_state.get("access_token")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         response = requests.request(
             method,
             f"{API_BASE_URL}{path}",
             json=payload,
+            headers=headers,
             timeout=REQUEST_TIMEOUT,
         )
         if response.status_code >= 400:
@@ -175,6 +184,7 @@ def api_upload_evidence(data: dict[str, Any], uploaded_file) -> Any:
             f"{API_BASE_URL}/evidence/upload",
             data=data,
             files={"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)},
+            headers={"Authorization": f"Bearer {st.session_state.get('access_token', '')}"},
             timeout=60,
         )
         if response.status_code >= 400:
@@ -193,7 +203,11 @@ def api_upload_evidence(data: dict[str, Any], uploaded_file) -> Any:
 
 def download_evidence_file(evidence_id: int) -> tuple[bytes, str] | None:
     try:
-        response = requests.get(f"{API_BASE_URL}/evidence/{evidence_id}/download", timeout=60)
+        response = requests.get(
+            f"{API_BASE_URL}/evidence/{evidence_id}/download",
+            headers={"Authorization": f"Bearer {st.session_state.get('access_token', '')}"},
+            timeout=60,
+        )
         response.raise_for_status()
         disposition = response.headers.get("content-disposition", "")
         filename = f"evidence-{evidence_id}"
@@ -203,6 +217,122 @@ def download_evidence_file(evidence_id: int) -> tuple[bytes, str] | None:
     except requests.RequestException as exc:
         st.error(f"Download failed: {exc}")
         return None
+
+
+
+def readable_column_name(name: str) -> str:
+    return name.replace("_", " ").strip().title()
+
+
+def excel_value(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple, set)):
+        return str(value)
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    return value
+
+
+def build_excel_workbook(
+    sheets: dict[str, list[dict[str, Any]]],
+    title: str,
+) -> bytes:
+    workbook = Workbook()
+    default_sheet = workbook.active
+    workbook.remove(default_sheet)
+
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    header_font = Font(color="FFFFFF", bold=True)
+    title_font = Font(size=16, bold=True)
+    generated_font = Font(size=10, italic=True, color="666666")
+
+    for sheet_name, records in sheets.items():
+        safe_name = sheet_name[:31] or "Data"
+        worksheet = workbook.create_sheet(title=safe_name)
+
+        worksheet["A1"] = title
+        worksheet["A1"].font = title_font
+        worksheet["A2"] = f"Generated: {datetime.now().isoformat(timespec='seconds')}"
+        worksheet["A2"].font = generated_font
+
+        if not records:
+            worksheet["A4"] = "No records available."
+            worksheet.column_dimensions["A"].width = 28
+            continue
+
+        frame = pd.DataFrame(records)
+        frame = frame.drop(
+            columns=[
+                column
+                for column in ["hashed_password"]
+                if column in frame.columns
+            ],
+            errors="ignore",
+        )
+
+        headers = list(frame.columns)
+        header_row = 4
+
+        for column_index, column_name in enumerate(headers, start=1):
+            cell = worksheet.cell(
+                row=header_row,
+                column=column_index,
+                value=readable_column_name(column_name),
+            )
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        for row_index, row in enumerate(
+            frame.itertuples(index=False, name=None),
+            start=header_row + 1,
+        ):
+            for column_index, value in enumerate(row, start=1):
+                cell = worksheet.cell(
+                    row=row_index,
+                    column=column_index,
+                    value=excel_value(value),
+                )
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+        worksheet.freeze_panes = f"A{header_row + 1}"
+        worksheet.auto_filter.ref = worksheet.dimensions
+
+        for column_index, column_name in enumerate(headers, start=1):
+            values = [
+                readable_column_name(column_name),
+                *[
+                    str(excel_value(value))
+                    for value in frame.iloc[:, column_index - 1].tolist()
+                ],
+            ]
+            width = min(max(len(value) for value in values) + 2, 45)
+            worksheet.column_dimensions[
+                get_column_letter(column_index)
+            ].width = max(width, 12)
+
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def excel_download_button(
+    label: str,
+    file_name: str,
+    sheets: dict[str, list[dict[str, Any]]],
+    title: str,
+    key: str,
+) -> None:
+    data = build_excel_workbook(sheets, title)
+    st.download_button(
+        label,
+        data=data,
+        file_name=file_name,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=key,
+        width="stretch",
+    )
 
 
 def clean_frame(records: list[dict[str, Any]], preferred: list[str]) -> pd.DataFrame:
@@ -275,11 +405,37 @@ def dashboard_page() -> None:
     management = api_get("/management/dashboard")
     compliance = api_get("/compliance/dashboard")
     risks = api_get("/risks") or []
+
+    export_col, _ = st.columns([1, 3])
+    with export_col:
+        excel_download_button(
+            "⬇ Export risk register",
+            "cyber_x_force_risk_register.xlsx",
+            {"Risk Register": risks},
+            "Cyber_X_Force Risk Register",
+            "export-risks",
+        )
     incidents = api_get("/incidents") or []
     findings = api_get("/audit-findings") or []
 
     if not management:
         return
+
+    export_col, _ = st.columns([1, 3])
+    with export_col:
+        excel_download_button(
+            "⬇ Export management workbook",
+            "cyber_x_force_management_dashboard.xlsx",
+            {
+                "Management Summary": [management],
+                "Compliance Dashboard": [compliance or {}],
+                "Risks": risks,
+                "Incidents": incidents,
+                "Audit Findings": findings,
+            },
+            "Cyber_X_Force Management Dashboard",
+            "export-management",
+        )
 
     row1 = st.columns(4)
     with row1[0]:
@@ -411,6 +567,16 @@ def assets_page() -> None:
     page_header("Assets", "Register, classify and review organizational information assets.")
     assets = api_get("/assets") or []
     departments = api_get("/departments") or []
+
+    export_col, _ = st.columns([1, 3])
+    with export_col:
+        excel_download_button(
+            "⬇ Export assets to Excel",
+            "cyber_x_force_assets.xlsx",
+            {"Assets": assets},
+            "Cyber_X_Force Asset Register",
+            "export-assets",
+        )
 
     search_col, type_col, criticality_col = st.columns([2, 1, 1])
     search = search_col.text_input("Search assets", placeholder="Code, name, type or location")
@@ -569,6 +735,17 @@ def controls_page() -> None:
     controls = api_get("/controls") or []
 
     c1, c2, c3 = st.columns([2, 1, 1])
+    export_col, _ = st.columns([1, 3])
+    with export_col:
+        excel_download_button(
+            "⬇ Export ISO controls",
+            "cyber_x_force_iso_controls.xlsx",
+            {"ISO Controls": controls},
+            "Cyber_X_Force ISO/IEC 27001 Controls",
+            "export-controls",
+        )
+
+    c1, c2, c3 = st.columns([2, 1, 1])
     search = c1.text_input("Search controls", placeholder="Control code, title or owner")
     categories = sorted({item.get("category") for item in controls if item.get("category")})
     selected_category = c2.selectbox("Category", ["All"] + categories)
@@ -624,6 +801,22 @@ def compliance_page() -> None:
     overdue = api_get("/compliance/overdue-controls") or []
     assessments = api_get("/compliance-assessments") or []
     controls = api_get("/controls") or []
+
+    cols = st.columns(4)
+    export_col, _ = st.columns([1, 3])
+    with export_col:
+        excel_download_button(
+            "⬇ Export compliance workbook",
+            "cyber_x_force_compliance.xlsx",
+            {
+                "Summary": [summary],
+                "Assessments": assessments,
+                "Overdue Controls": overdue,
+                "ISO Controls": controls,
+            },
+            "Cyber_X_Force Compliance Report",
+            "export-compliance",
+        )
 
     cols = st.columns(4)
     with cols[0]:
@@ -715,6 +908,16 @@ def evidence_page() -> None:
     controls = api_get("/controls") or []
     assessments = api_get("/compliance-assessments") or []
 
+    export_col, _ = st.columns([1, 3])
+    with export_col:
+        excel_download_button(
+            "⬇ Export evidence register",
+            "cyber_x_force_evidence_register.xlsx",
+            {"Evidence Register": evidence},
+            "Cyber_X_Force Evidence Register",
+            "export-evidence",
+        )
+
     verified = sum(bool(item.get("is_verified")) for item in evidence)
     cols = st.columns(3)
     with cols[0]: kpi("Evidence Records", len(evidence), "Uploaded and referenced evidence")
@@ -792,6 +995,20 @@ def audits_page() -> None:
     audits = api_get("/audits") or []
     findings = api_get("/audit-findings") or []
     controls = api_get("/controls") or []
+
+    export_col, _ = st.columns([1, 3])
+    with export_col:
+        excel_download_button(
+            "⬇ Export audits and findings",
+            "cyber_x_force_audits_findings.xlsx",
+            {
+                "Audits": audits,
+                "Audit Findings": findings,
+                "ISO Controls": controls,
+            },
+            "Cyber_X_Force Audit and Findings Report",
+            "export-audits-findings",
+        )
 
     tab1, tab2 = st.tabs(["Audits", "Audit Findings"])
 
@@ -892,6 +1109,19 @@ def actions_page() -> None:
     actions = api_get("/corrective-actions") or []
     findings = api_get("/audit-findings") or []
 
+    export_col, _ = st.columns([1, 3])
+    with export_col:
+        excel_download_button(
+            "⬇ Export corrective actions",
+            "cyber_x_force_corrective_actions.xlsx",
+            {
+                "Corrective Actions": actions,
+                "Related Findings": findings,
+            },
+            "Cyber_X_Force Corrective Action Register",
+            "export-actions",
+        )
+
     finding_options = {
         f"{item['finding_code']} — {item['title']}": item["id"]
         for item in findings
@@ -960,6 +1190,19 @@ def incidents_page() -> None:
     page_header("Incidents", "Record, triage, contain and close cybersecurity incidents.")
     incidents = api_get("/incidents") or []
     assets = api_get("/assets") or []
+
+    export_col, _ = st.columns([1, 3])
+    with export_col:
+        excel_download_button(
+            "⬇ Export incident register",
+            "cyber_x_force_incidents.xlsx",
+            {
+                "Incidents": incidents,
+                "Assets": assets,
+            },
+            "Cyber_X_Force Incident Register",
+            "export-incidents",
+        )
 
     asset_options = {"None": None} | {
         f"{item['asset_code']} — {item['name']}": item["id"]
@@ -1192,6 +1435,265 @@ def system_status_page() -> None:
         )
 
 
+def user_administration_page() -> None:
+    page_header(
+        "User Administration",
+        "Create accounts, assign roles, reset passwords and enable or disable access.",
+    )
+
+    users = api_get("/users") or []
+    roles = api_get("/roles") or []
+    departments = api_get("/departments") or []
+
+    role_by_id = {item["id"]: item["name"] for item in roles}
+    department_by_id = {item["id"]: item["name"] for item in departments}
+    role_options = {item["name"]: item["id"] for item in roles}
+    department_options = {"None": None} | {
+        item["name"]: item["id"] for item in departments
+    }
+
+    summary_cols = st.columns(3)
+    with summary_cols[0]:
+        kpi("Total Users", len(users), "Registered accounts")
+    with summary_cols[1]:
+        kpi(
+            "Active Users",
+            sum(bool(item.get("is_active")) for item in users),
+            "Accounts allowed to sign in",
+        )
+    with summary_cols[2]:
+        kpi(
+            "Inactive Users",
+            sum(not bool(item.get("is_active")) for item in users),
+            "Disabled accounts",
+        )
+
+    search_col, role_col, status_col = st.columns([2, 1, 1])
+    search = search_col.text_input(
+        "Search users",
+        placeholder="Name or email",
+    )
+    selected_role = role_col.selectbox(
+        "Role filter",
+        ["All"] + sorted(role_options),
+    )
+    selected_status = status_col.selectbox(
+        "Status filter",
+        ["All", "Active", "Inactive"],
+    )
+
+    filtered_users = users
+    if search:
+        token = search.lower().strip()
+        filtered_users = [
+            item
+            for item in filtered_users
+            if token in str(item.get("full_name", "")).lower()
+            or token in str(item.get("email", "")).lower()
+        ]
+
+    if selected_role != "All":
+        filtered_users = [
+            item
+            for item in filtered_users
+            if role_by_id.get(item.get("role_id")) == selected_role
+        ]
+
+    if selected_status != "All":
+        expected_active = selected_status == "Active"
+        filtered_users = [
+            item
+            for item in filtered_users
+            if bool(item.get("is_active")) == expected_active
+        ]
+
+    display_users = [
+        {
+            "id": item.get("id"),
+            "full_name": item.get("full_name"),
+            "email": item.get("email"),
+            "role": role_by_id.get(item.get("role_id"), "Unknown"),
+            "department": department_by_id.get(
+                item.get("department_id"),
+                "None",
+            ),
+            "status": "Active" if item.get("is_active") else "Inactive",
+            "created_at": item.get("created_at"),
+        }
+        for item in filtered_users
+    ]
+
+    show_table(
+        display_users,
+        [
+            "id",
+            "full_name",
+            "email",
+            "role",
+            "department",
+            "status",
+            "created_at",
+        ],
+        "No users match the selected filters.",
+    )
+
+    with st.expander("➕ Create user"):
+        with st.form("create_user_form", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            full_name = c1.text_input("Full name")
+            email = c2.text_input("Email")
+            password = c1.text_input(
+                "Temporary password",
+                type="password",
+            )
+            role_name = c2.selectbox(
+                "Role",
+                list(role_options) if role_options else ["No roles"],
+            )
+            department_name = st.selectbox(
+                "Department",
+                list(department_options),
+            )
+            submitted = st.form_submit_button(
+                "Create user",
+                width="stretch",
+            )
+
+        if submitted and role_options:
+            created = api_post(
+                "/users",
+                {
+                    "full_name": full_name.strip(),
+                    "email": email.strip().lower(),
+                    "password": password,
+                    "role_id": role_options[role_name],
+                    "department_id": department_options[department_name],
+                },
+            )
+            if created:
+                st.success("User created.")
+                st.rerun()
+
+    if not users:
+        return
+
+    user_options = {
+        f"{item['full_name']} — {item['email']} (ID {item['id']})": item
+        for item in users
+    }
+
+    with st.expander("✏️ Edit, enable or disable user"):
+        selected_label = st.selectbox(
+            "Select user",
+            list(user_options),
+            key="admin_edit_user",
+        )
+        selected_user = user_options[selected_label]
+
+        current_role_name = role_by_id.get(
+            selected_user.get("role_id"),
+            next(iter(role_options), ""),
+        )
+        current_department_name = department_by_id.get(
+            selected_user.get("department_id"),
+            "None",
+        )
+
+        with st.form("edit_user_form"):
+            c1, c2 = st.columns(2)
+            edit_full_name = c1.text_input(
+                "Full name",
+                value=selected_user.get("full_name", ""),
+            )
+            edit_email = c2.text_input(
+                "Email",
+                value=selected_user.get("email", ""),
+            )
+            edit_role = c1.selectbox(
+                "Role",
+                list(role_options),
+                index=list(role_options).index(current_role_name)
+                if current_role_name in role_options
+                else 0,
+            )
+            edit_department = c2.selectbox(
+                "Department",
+                list(department_options),
+                index=list(department_options).index(
+                    current_department_name
+                )
+                if current_department_name in department_options
+                else 0,
+            )
+            edit_active = st.checkbox(
+                "Account active",
+                value=bool(selected_user.get("is_active")),
+            )
+            save_changes = st.form_submit_button(
+                "Save user changes",
+                width="stretch",
+            )
+
+        if save_changes:
+            updated = api_put(
+                f"/users/{selected_user['id']}",
+                {
+                    "full_name": edit_full_name.strip(),
+                    "email": edit_email.strip().lower(),
+                    "role_id": role_options[edit_role],
+                    "department_id": department_options[edit_department],
+                    "is_active": edit_active,
+                },
+            )
+            if updated:
+                st.success("User updated.")
+                st.rerun()
+
+    with st.expander("🔑 Reset user password"):
+        selected_password_label = st.selectbox(
+            "Select account",
+            list(user_options),
+            key="admin_reset_user",
+        )
+        password_user = user_options[selected_password_label]
+
+        with st.form("reset_password_form", clear_on_submit=True):
+            new_password = st.text_input(
+                "New temporary password",
+                type="password",
+                help="Minimum 8 characters.",
+            )
+            confirm_password = st.text_input(
+                "Confirm temporary password",
+                type="password",
+            )
+            reset_password = st.form_submit_button(
+                "Reset password",
+                width="stretch",
+            )
+
+        if reset_password:
+            if new_password != confirm_password:
+                st.error("The password confirmation does not match.")
+            elif len(new_password) < 8:
+                st.error("The temporary password must contain at least 8 characters.")
+            else:
+                updated = api_put(
+                    f"/users/{password_user['id']}",
+                    {"password": new_password},
+                )
+                if updated:
+                    st.success(
+                        f"Password reset for {password_user['email']}."
+                    )
+
+
+def audit_trail_page() -> None:
+    page_header("Audit Trail", "Review authentication events and changes made through the API.")
+    logs = api_get("/audit-logs") or []
+    show_table(logs, ["created_at", "user_email", "action", "resource", "method", "status_code", "ip_address"], "No audit events recorded.")
+
+
 PAGES = {
     "🏠 Dashboard": dashboard_page,
     "🗂️ Assets": assets_page,
@@ -1205,20 +1707,69 @@ PAGES = {
     "⚙️ System Status": system_status_page,
 }
 
+
+ROLE_PAGES = {
+    "Administrator": list(PAGES) + ["👥 User Administration", "📜 Audit Trail"],
+    "Risk Manager": ["🏠 Dashboard", "🗂️ Assets", "⚠️ Risk Register", "🛡️ ISO Controls", "✅ Compliance", "📁 Evidence", "⚙️ System Status"],
+    "Asset Owner": ["🏠 Dashboard", "🗂️ Assets", "⚠️ Risk Register", "🛡️ ISO Controls", "📁 Evidence"],
+    "Internal Auditor": ["🏠 Dashboard", "🛡️ ISO Controls", "✅ Compliance", "📁 Evidence", "🔎 Audits and Findings", "🧰 Corrective Actions", "📜 Audit Trail"],
+    "Incident Manager": ["🏠 Dashboard", "🗂️ Assets", "⚠️ Risk Register", "🧰 Corrective Actions", "🚨 Incidents", "📁 Evidence"],
+    "Executive Viewer": ["🏠 Dashboard", "✅ Compliance", "⚙️ System Status"],
+}
+EXTRA_PAGES = {"👥 User Administration": user_administration_page, "📜 Audit Trail": audit_trail_page}
+ALL_PAGES = PAGES | EXTRA_PAGES
+
+if "access_token" not in st.session_state:
+    st.session_state.access_token = None
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+
+def login_page() -> None:
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    left, center, right = st.columns([1, 1.2, 1])
+    with center:
+        page_header("🛡️ Cyber_X_Force Login", "Sign in to the ISO/IEC 27001 GRC platform.")
+        with st.form("login_form"):
+            email = st.text_input("Email", value="admin@cyberxforce.com")
+            password = st.text_input("Password", type="password")
+            submitted = st.form_submit_button("Login", width="stretch")
+        if submitted:
+            result = api_post("/auth/login", {"email": email, "password": password})
+            if result:
+                st.session_state.access_token = result["access_token"]
+                st.session_state.current_user = result["user"]
+                st.rerun()
+        st.caption("Demo administrator: admin@cyberxforce.com / Admin@12345")
+
+if not st.session_state.access_token:
+    login_page()
+    st.stop()
+
+if not st.session_state.current_user:
+    st.session_state.current_user = api_get("/auth/me")
+if not st.session_state.current_user:
+    st.session_state.access_token = None
+    st.stop()
+
+current_user = st.session_state.current_user
+role_name = current_user.get("role_name", "Executive Viewer")
+available_pages = [page for page in ROLE_PAGES.get(role_name, ["🏠 Dashboard"]) if page in ALL_PAGES]
+
 with st.sidebar:
     st.markdown("## 🛡️ Cyber_X_Force")
     st.caption("ISO/IEC 27001 GRC Platform")
-    selected_page = st.radio(
-        "Navigation",
-        list(PAGES),
-        label_visibility="collapsed",
-    )
+    st.success(f"{current_user.get('full_name')}\n\n{role_name}")
+    selected_page = st.radio("Navigation", available_pages, label_visibility="collapsed")
     st.divider()
     health = api_get("/health")
     if health and health.get("status") == "healthy":
         st.success("Backend connected")
     else:
         st.error("Backend unavailable")
+    if st.button("Logout", width="stretch"):
+        st.session_state.access_token = None
+        st.session_state.current_user = None
+        st.rerun()
     st.caption(API_BASE_URL)
 
-PAGES[selected_page]()
+ALL_PAGES[selected_page]()

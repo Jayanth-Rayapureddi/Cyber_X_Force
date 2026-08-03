@@ -1,11 +1,16 @@
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Annotated
+import os
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
 
-from fastapi import Depends, FastAPI, HTTPException, Response, status, UploadFile, File, Form
+from fastapi import Depends, FastAPI, HTTPException, Response, status, UploadFile, File, Form, Request
+from fastapi.responses import JSONResponse
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -24,6 +29,39 @@ EVIDENCE_UPLOAD_DIR = Path("/uploads/evidence")
 EVIDENCE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 ALLOWED_EVIDENCE_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".txt", ".csv"}
 MAX_EVIDENCE_FILE_SIZE = 10 * 1024 * 1024
+
+
+SECRET_KEY = os.getenv("SECRET_KEY", "change-this-development-secret")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+PASSWORD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+
+PUBLIC_PATHS = {"/", "/health", "/auth/login", "/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
+ROLE_WRITE_PREFIXES = {
+    "Administrator": ("/",),
+    "Risk Manager": ("/assets", "/risks", "/controls", "/risk-controls", "/threats", "/vulnerabilities"),
+    "Asset Owner": ("/assets",),
+    "Internal Auditor": ("/audits", "/audit-findings", "/evidence", "/compliance-assessments"),
+    "Incident Manager": ("/incidents", "/incident-actions", "/corrective-actions"),
+    "Executive Viewer": tuple(),
+}
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return PASSWORD_CONTEXT.verify(plain_password, hashed_password)
+
+def hash_password(password: str) -> str:
+    return PASSWORD_CONTEXT.hash(password)
+
+def create_access_token(user: models.User, role_name: str) -> str:
+    expires = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {"sub": str(user.id), "email": user.email, "role": role_name, "exp": expires}
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+def decode_access_token(token: str) -> dict:
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired access token.") from exc
 
 
 @asynccontextmanager
@@ -45,6 +83,146 @@ app = FastAPI(
     version="0.2.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def authentication_and_audit_middleware(request: Request, call_next):
+    path = request.url.path
+    if path in PUBLIC_PATHS or path.startswith("/docs") or path.startswith("/redoc"):
+        return await call_next(request)
+
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
+        return JSONResponse(status_code=401, content={"detail": "Authentication required."})
+
+    token = authorization.split(" ", 1)[1]
+    try:
+        payload = decode_access_token(token)
+        user_id = int(payload.get("sub", 0))
+    except (HTTPException, ValueError, TypeError):
+        return JSONResponse(status_code=401, content={"detail": "Invalid or expired access token."})
+
+    with SessionLocal() as auth_db:
+        user = auth_db.get(models.User, user_id)
+        if user is None or not user.is_active:
+            return JSONResponse(status_code=401, content={"detail": "User account is inactive or unavailable."})
+        role = auth_db.get(models.Role, user.role_id)
+        role_name = role.name if role else "Unknown"
+
+    request.state.user_id = user.id
+    request.state.user_email = user.email
+    request.state.role_name = role_name
+
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        prefixes = ROLE_WRITE_PREFIXES.get(role_name, tuple())
+        if role_name != "Administrator" and not any(path.startswith(prefix) for prefix in prefixes):
+            return JSONResponse(status_code=403, content={"detail": f"Role '{role_name}' cannot modify this resource."})
+
+    response = await call_next(request)
+
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        try:
+            with SessionLocal() as audit_db:
+                crud.create_audit_log(
+                    audit_db, user_id=user.id, user_email=user.email,
+                    action=f"{request.method} request", resource=path, method=request.method,
+                    status_code=response.status_code,
+                    ip_address=request.client.host if request.client else None,
+                )
+        except Exception:
+            pass
+    return response
+
+
+def current_user_from_request(request: Request, db: Session) -> tuple[models.User, models.Role]:
+    user = db.get(models.User, getattr(request.state, "user_id", 0))
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    role = db.get(models.Role, user.role_id)
+    if role is None:
+        raise HTTPException(status_code=403, detail="User role is unavailable.")
+    return user, role
+
+@app.post("/auth/login", response_model=schemas.TokenResponse, tags=["Authentication"])
+def login(login_data: schemas.LoginRequest, request: Request, db: DatabaseSession):
+    user = crud.get_user_by_email(db, str(login_data.email))
+    if user is None or not user.is_active or not verify_password(login_data.password, user.hashed_password):
+        try:
+            crud.create_audit_log(db, user_id=user.id if user else None, user_email=str(login_data.email), action="Login failed", resource="/auth/login", method="POST", status_code=401, ip_address=request.client.host if request.client else None)
+        except Exception:
+            pass
+        raise HTTPException(status_code=401, detail="Incorrect email or password.")
+    role = db.get(models.Role, user.role_id)
+    token = create_access_token(user, role.name if role else "Unknown")
+    crud.create_audit_log(db, user_id=user.id, user_email=user.email, action="Login successful", resource="/auth/login", method="POST", status_code=200, ip_address=request.client.host if request.client else None)
+    return {
+        "access_token": token, "token_type": "bearer",
+        "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user": {"id": user.id, "full_name": user.full_name, "email": user.email, "role_id": user.role_id, "role_name": role.name if role else "Unknown", "department_id": user.department_id, "is_active": user.is_active},
+    }
+
+@app.get("/auth/me", response_model=schemas.CurrentUserResponse, tags=["Authentication"])
+def auth_me(request: Request, db: DatabaseSession):
+    user, role = current_user_from_request(request, db)
+    return {"id": user.id, "full_name": user.full_name, "email": user.email, "role_id": user.role_id, "role_name": role.name, "department_id": user.department_id, "is_active": user.is_active}
+
+@app.get("/users", response_model=list[schemas.UserResponse], tags=["User Administration"])
+def list_users(request: Request, db: DatabaseSession):
+    _, role = current_user_from_request(request, db)
+    if role.name != "Administrator":
+        raise HTTPException(status_code=403, detail="Administrator access required.")
+    return crud.get_users(db)
+
+@app.post("/users", response_model=schemas.UserResponse, status_code=201, tags=["User Administration"])
+def create_user(user_data: schemas.UserCreate, request: Request, db: DatabaseSession):
+    _, role = current_user_from_request(request, db)
+    if role.name != "Administrator":
+        raise HTTPException(status_code=403, detail="Administrator access required.")
+    if crud.get_user_by_email(db, str(user_data.email)):
+        raise HTTPException(status_code=409, detail="Email address already exists.")
+    if db.get(models.Role, user_data.role_id) is None:
+        raise HTTPException(status_code=400, detail="Selected role does not exist.")
+    return crud.create_user_record(db, user_data, hash_password(user_data.password))
+
+@app.put("/users/{user_id}", response_model=schemas.UserResponse, tags=["User Administration"])
+def update_user(user_id: int, user_data: schemas.UserUpdate, request: Request, db: DatabaseSession):
+    _, role = current_user_from_request(request, db)
+    if role.name != "Administrator":
+        raise HTTPException(status_code=403, detail="Administrator access required.")
+    user = db.get(models.User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found.")
+    values = user_data.model_dump(exclude_unset=True)
+
+    new_email = values.get("email")
+    if new_email:
+        existing_user = crud.get_user_by_email(db, str(new_email))
+        if existing_user is not None and existing_user.id != user.id:
+            raise HTTPException(status_code=409, detail="Email address already exists.")
+        values["email"] = str(new_email).lower()
+
+    if values.get("role_id") is not None and db.get(models.Role, values["role_id"]) is None:
+        raise HTTPException(status_code=400, detail="Selected role does not exist.")
+
+    if values.get("department_id") is not None and db.get(models.Department, values["department_id"]) is None:
+        raise HTTPException(status_code=400, detail="Selected department does not exist.")
+
+    current_admin, _ = current_user_from_request(request, db)
+    if user.id == current_admin.id and values.get("is_active") is False:
+        raise HTTPException(status_code=400, detail="You cannot disable your own account.")
+
+    password = values.pop("password", None)
+    if password:
+        values["hashed_password"] = hash_password(password)
+
+    return crud.update_user_record(db, user, values)
+
+@app.get("/audit-logs", response_model=list[schemas.AuditLogResponse], tags=["Audit Trail"])
+def list_audit_logs(request: Request, db: DatabaseSession, limit: int = 200):
+    _, role = current_user_from_request(request, db)
+    if role.name not in {"Administrator", "Internal Auditor"}:
+        raise HTTPException(status_code=403, detail="Administrator or Internal Auditor access required.")
+    return crud.get_audit_logs(db, min(max(limit, 1), 1000))
 
 
 # =========================================================
