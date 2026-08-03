@@ -11,6 +11,20 @@ import streamlit as st
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.platypus import (
+    KeepTogether,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://backend:8000").rstrip("/")
@@ -335,6 +349,226 @@ def excel_download_button(
     )
 
 
+
+PDF_REPORT_COLUMNS: dict[str, list[str]] = {
+    "Risk Register": [
+        "risk_code", "title", "inherent_level", "inherent_score",
+        "likelihood", "impact", "status", "treatment_option", "risk_owner",
+        "residual_level",
+    ],
+    "ISO Controls": [
+        "control_code", "title", "category", "implementation_status",
+        "implementation_percentage", "owner", "target_date",
+    ],
+    "Compliance Assessments": [
+        "assessment_code", "control_id", "compliance_status",
+        "compliance_score", "assessor", "assessment_date", "next_review_date",
+    ],
+    "Audits": [
+        "audit_code", "title", "audit_type", "lead_auditor",
+        "planned_start_date", "planned_end_date", "status",
+    ],
+    "Audit Findings": [
+        "finding_code", "title", "finding_type", "severity", "status",
+        "owner", "due_date", "audit_id", "control_id",
+    ],
+    "Corrective Actions": [
+        "action_code", "action_description", "action_owner", "status",
+        "completion_percentage", "target_date", "completion_date", "finding_id",
+    ],
+    "Incidents": [
+        "incident_code", "title", "category", "severity", "status",
+        "assigned_to", "reported_by", "detected_at", "asset_id",
+    ],
+    "Evidence Register": [
+        "evidence_code", "title", "evidence_type", "owner", "control_id",
+        "assessment_id", "collected_at", "valid_until", "is_verified",
+    ],
+}
+
+
+def pdf_safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, (dict, list, tuple, set)):
+        return str(value)
+    return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def report_styles() -> dict[str, Any]:
+    styles = getSampleStyleSheet()
+    styles.add(
+        ParagraphStyle(
+            name="ReportTitle",
+            parent=styles["Title"],
+            fontSize=22,
+            leading=26,
+            textColor=colors.HexColor("#17365D"),
+            alignment=TA_CENTER,
+            spaceAfter=12,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="ReportSubtitle",
+            parent=styles["Normal"],
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor("#5A6470"),
+            alignment=TA_CENTER,
+            spaceAfter=16,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="SectionHeading",
+            parent=styles["Heading2"],
+            fontSize=14,
+            leading=17,
+            textColor=colors.HexColor("#1F4E78"),
+            spaceBefore=8,
+            spaceAfter=8,
+        )
+    )
+    styles.add(
+        ParagraphStyle(
+            name="SmallTable",
+            parent=styles["BodyText"],
+            fontSize=7,
+            leading=9,
+        )
+    )
+    return styles
+
+
+def add_page_number(canvas, document) -> None:
+    canvas.saveState()
+    canvas.setFont("Helvetica", 8)
+    canvas.setFillColor(colors.HexColor("#666666"))
+    page_text = f"Cyber_X_Force | Page {document.page}"
+    canvas.drawRightString(285 * mm, 10 * mm, page_text)
+    canvas.restoreState()
+
+
+def summary_table(summary_items: list[tuple[str, Any]], styles: dict[str, Any]) -> Table:
+    cells = []
+    for label, value in summary_items:
+        cells.append(
+            [
+                Paragraph(f"<b>{pdf_safe_text(label)}</b>", styles["SmallTable"]),
+                Paragraph(pdf_safe_text(value), styles["SmallTable"]),
+            ]
+        )
+    table = Table(cells, colWidths=[55 * mm, 65 * mm], hAlign="CENTER")
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#D9EAF7")),
+                ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#B5C7D8")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ]
+        )
+    )
+    return table
+
+
+def records_table(
+    section_name: str,
+    records: list[dict[str, Any]],
+    styles: dict[str, Any],
+) -> Table | Paragraph:
+    if not records:
+        return Paragraph("No records available.", styles["BodyText"])
+
+    preferred = PDF_REPORT_COLUMNS.get(section_name, [])
+    available = list(records[0].keys())
+    columns = [column for column in preferred if column in available]
+    if not columns:
+        columns = [
+            column for column in available
+            if column not in {"created_at", "updated_at", "hashed_password"}
+        ][:10]
+
+    header = [
+        Paragraph(f"<b>{readable_column_name(column)}</b>", styles["SmallTable"])
+        for column in columns
+    ]
+    rows = [header]
+    for record in records:
+        rows.append(
+            [Paragraph(pdf_safe_text(record.get(column)), styles["SmallTable"]) for column in columns]
+        )
+
+    page_width = landscape(A4)[0] - 24 * mm
+    col_width = page_width / max(len(columns), 1)
+    table = Table(rows, colWidths=[col_width] * len(columns), repeatRows=1)
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F4E78")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#B8C4CE")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F3F6F9")]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 3),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]
+        )
+    )
+    return table
+
+
+def build_pdf_report(
+    title: str,
+    subtitle: str,
+    summary_items: list[tuple[str, Any]],
+    sections: list[tuple[str, list[dict[str, Any]]]],
+    generated_by: str,
+) -> bytes:
+    output = BytesIO()
+    styles = report_styles()
+    document = SimpleDocTemplate(
+        output,
+        pagesize=landscape(A4),
+        rightMargin=12 * mm,
+        leftMargin=12 * mm,
+        topMargin=14 * mm,
+        bottomMargin=16 * mm,
+        title=title,
+        author="Cyber_X_Force",
+        subject=subtitle,
+    )
+
+    story: list[Any] = [
+        Paragraph(pdf_safe_text(title), styles["ReportTitle"]),
+        Paragraph(
+            f"{pdf_safe_text(subtitle)}<br/>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Generated by: {pdf_safe_text(generated_by)}",
+            styles["ReportSubtitle"],
+        ),
+    ]
+
+    if summary_items:
+        story.append(summary_table(summary_items, styles))
+        story.append(Spacer(1, 8 * mm))
+
+    for index, (section_name, records) in enumerate(sections):
+        if index > 0:
+            story.append(PageBreak())
+        story.append(Paragraph(pdf_safe_text(section_name), styles["SectionHeading"]))
+        story.append(records_table(section_name, records, styles))
+
+    document.build(story, onFirstPage=add_page_number, onLaterPages=add_page_number)
+    return output.getvalue()
+
+
 def clean_frame(records: list[dict[str, Any]], preferred: list[str]) -> pd.DataFrame:
     if not records:
         return pd.DataFrame()
@@ -417,6 +651,9 @@ def dashboard_page() -> None:
         )
     incidents = api_get("/incidents") or []
     findings = api_get("/audit-findings") or []
+    actions = api_get("/corrective-actions") or []
+    evidence = api_get("/evidence") or []
+    audits = api_get("/audits") or []
 
     if not management:
         return
@@ -530,37 +767,303 @@ def dashboard_page() -> None:
     if not overdue:
         st.success("No overdue controls.")
     else:
-        columns = st.columns(min(3, len(overdue)))
-        for index, control in enumerate(overdue[:3]):
-            with columns[index]:
+        overdue_rows = [
+            {
+                "Control": control.get("control_code"),
+                "Title": control.get("title"),
+                "Owner": control.get("owner") or "Unassigned",
+                "Status": control.get("implementation_status"),
+                "Progress": f"{control.get('implementation_percentage', 0)}%",
+                "Target Date": str(control.get("target_date", ""))[:10],
+                "Days Overdue": control.get("days_overdue", 0),
+            }
+            for control in overdue[:5]
+        ]
+        show_table(
+            overdue_rows,
+            [
+                "Control",
+                "Title",
+                "Owner",
+                "Status",
+                "Progress",
+                "Target Date",
+                "Days Overdue",
+            ],
+            "No overdue controls.",
+        )
+
+    if incidents or findings:
+        
+        st.subheader("Recent governance activity")
+
+        activity_left, activity_right = st.columns(2)
+
+        with activity_left:
+            st.markdown("### Latest incidents")
+
+            incident_rows = [
+                {
+                    "Incident Code": item.get("incident_code"),
+                    "Title": item.get("title"),
+                    "Severity": item.get("severity"),
+                    "Status": item.get("status"),
+                    "Assigned To": item.get("assigned_to"),
+                    "Detected Date": str(item.get("detected_at", ""))[:10],
+                }
+                for item in incidents[:5]
+            ]
+
+            show_table(
+                incident_rows,
+                [
+                    "Incident Code",
+                    "Title",
+                    "Severity",
+                    "Status",
+                    "Assigned To",
+                    "Detected Date",
+                ],
+                "No incidents.",
+            )
+
+        with activity_right:
+            st.markdown("### Latest findings")
+
+            finding_rows = [
+                {
+                    "Finding Code": item.get("finding_code"),
+                    "Title": item.get("title"),
+                    "Severity": item.get("severity"),
+                    "Owner": item.get("owner"),
+                    "Status": item.get("status"),
+                    "Due Date": str(item.get("due_date", ""))[:10],
+                }
+                for item in findings[:5]
+            ]
+
+            show_table(
+                finding_rows,
+                [
+                    "Finding Code",
+                    "Title",
+                    "Severity",
+                    "Owner",
+                    "Status",
+                    "Due Date",
+                ],
+                "No findings.",
+            )
+
+
+    st.subheader("Executive priorities")
+
+    priority_left, priority_middle, priority_right = st.columns(3)
+
+    with priority_left:
+        st.markdown("### Top critical risks")
+
+        critical_risks = [
+            risk
+            for risk in risks
+            if risk.get("inherent_level") in ["Critical", "High"]
+        ]
+
+        critical_risks = sorted(
+            critical_risks,
+            key=lambda item: int(item.get("inherent_score", 0)),
+            reverse=True,
+        )[:5]
+
+        if not critical_risks:
+            st.success("No critical or high risks.")
+        else:
+            for risk in critical_risks:
+                level = str(risk.get("inherent_level", ""))
                 st.markdown(
                     f"""
                     <div class="section-card">
-                        <span class="danger-badge">{control.get('days_overdue', 0)} days overdue</span>
-                        <h3>{control.get('control_code', '')}</h3>
-                        <b>{control.get('title', '')}</b><br><br>
-                        Owner: {control.get('owner') or 'Unassigned'}<br>
-                        Progress: {control.get('implementation_percentage', 0)}%
+                        <span class="{badge_class(level)}">{level}</span>
+                        <h4>{risk.get("risk_code", "")}</h4>
+                        <b>{risk.get("title", "")}</b><br><br>
+                        Score: {risk.get("inherent_score", 0)}<br>
+                        Owner: {risk.get("risk_owner") or "Unassigned"}<br>
+                        Status: {risk.get("status") or "Unknown"}
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
 
-    if incidents or findings:
-        st.subheader("Recent governance activity")
-        activity_left, activity_right = st.columns(2)
-        with activity_left:
-            show_table(
-                incidents[:5],
-                ["incident_code", "title", "severity", "status", "assigned_to", "detected_at"],
-                "No incidents.",
+    with priority_middle:
+        st.markdown("### Latest incidents")
+
+        latest_incidents = sorted(
+            incidents,
+            key=lambda item: str(item.get("detected_at", "")),
+            reverse=True,
+        )[:5]
+
+        if not latest_incidents:
+            st.info("No incidents have been recorded.")
+        else:
+            for incident in latest_incidents:
+                severity = str(incident.get("severity", ""))
+                st.markdown(
+                    f"""
+                    <div class="section-card">
+                        <span class="{badge_class(severity)}">{severity}</span>
+                        <span class="status-badge">{incident.get("status", "")}</span>
+                        <h4>{incident.get("incident_code", "")}</h4>
+                        <b>{incident.get("title", "")}</b><br><br>
+                        Assigned to: {incident.get("assigned_to") or "Unassigned"}<br>
+                        Detected: {str(incident.get("detected_at", ""))[:10]}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+    with priority_right:
+        st.markdown("### Corrective-action progress")
+
+        action_summary = {
+            "Open": 0,
+            "In Progress": 0,
+            "Completed": 0,
+            "Verified": 0,
+        }
+
+        for action in actions:
+            status = action.get("status")
+            if status in action_summary:
+                action_summary[status] += 1
+
+        action_frame = pd.DataFrame(
+            [
+                {"Status": status, "Count": count}
+                for status, count in action_summary.items()
+            ]
+        )
+
+        if action_frame["Count"].sum() == 0:
+            st.info("No corrective actions have been recorded.")
+        else:
+            fig = px.bar(
+                action_frame,
+                x="Status",
+                y="Count",
+                text_auto=True,
             )
-        with activity_right:
-            show_table(
-                findings[:5],
-                ["finding_code", "title", "finding_type", "severity", "status", "owner", "due_date"],
-                "No findings.",
+            fig.update_layout(
+                height=330,
+                margin=dict(l=10, r=10, t=20, b=10),
             )
+            st.plotly_chart(fig, width="stretch")
+
+
+
+    st.subheader("Governance monitoring")
+
+    monitor_left, monitor_middle, monitor_right = st.columns(3)
+
+    with monitor_left:
+        st.markdown("### Upcoming audits")
+
+        upcoming_audits = [
+            audit
+            for audit in audits
+            if audit.get("status") in ["Planned", "In Progress"]
+        ]
+
+        upcoming_audits = sorted(
+            upcoming_audits,
+            key=lambda item: str(item.get("planned_start_date", "")),
+        )[:5]
+
+        if not upcoming_audits:
+            st.info("No upcoming audits.")
+        else:
+            for audit in upcoming_audits:
+                st.markdown(
+                    f"""
+                    <div class="section-card">
+                        <span class="status-badge">{audit.get("status", "")}</span>
+                        <h4>{audit.get("audit_code", "")}</h4>
+                        <b>{audit.get("title", "")}</b><br><br>
+                        Type: {audit.get("audit_type", "")}<br>
+                        Lead auditor: {audit.get("lead_auditor") or "Unassigned"}<br>
+                        Start: {str(audit.get("planned_start_date", ""))[:10]}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+    with monitor_middle:
+        st.markdown("### Latest evidence")
+
+        latest_evidence = sorted(
+            evidence,
+            key=lambda item: str(
+                item.get("created_at")
+                or item.get("collected_at")
+                or ""
+            ),
+            reverse=True,
+        )[:5]
+
+        if not latest_evidence:
+            st.info("No evidence has been recorded.")
+        else:
+            for item in latest_evidence:
+                verification = (
+                    "Verified"
+                    if item.get("is_verified")
+                    else "Pending verification"
+                )
+
+                st.markdown(
+                    f"""
+                    <div class="section-card">
+                        <span class="{badge_class(verification)}">{verification}</span>
+                        <h4>{item.get("evidence_code", "")}</h4>
+                        <b>{item.get("title", "")}</b><br><br>
+                        Type: {item.get("evidence_type", "")}<br>
+                        Owner: {item.get("owner") or "Unassigned"}<br>
+                        Collected: {str(item.get("collected_at", ""))[:10]}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+    with monitor_right:
+        st.markdown("### Findings by severity")
+
+        if not findings:
+            st.info("No audit findings have been recorded.")
+        else:
+            finding_frame = pd.DataFrame(findings)
+
+            severity_counts = (
+                finding_frame["severity"]
+                .fillna("Unknown")
+                .value_counts()
+                .rename_axis("Severity")
+                .reset_index(name="Count")
+            )
+
+            fig = px.pie(
+                severity_counts,
+                names="Severity",
+                values="Count",
+                hole=0.5,
+            )
+
+            fig.update_layout(
+                height=330,
+                margin=dict(l=10, r=10, t=20, b=10),
+            )
+
+            st.plotly_chart(fig, width="stretch")
+    
 
 
 def assets_page() -> None:
@@ -1689,9 +2192,462 @@ def user_administration_page() -> None:
 
 
 def audit_trail_page() -> None:
-    page_header("Audit Trail", "Review authentication events and changes made through the API.")
+    page_header(
+        "Audit Trail",
+        "Review authentication events and changes made through the API.",
+    )
+
     logs = api_get("/audit-logs") or []
-    show_table(logs, ["created_at", "user_email", "action", "resource", "method", "status_code", "ip_address"], "No audit events recorded.")
+
+    if not logs:
+        st.info("No audit events have been recorded.")
+        return
+
+    df = pd.DataFrame(logs)
+
+    df["created_at"] = pd.to_datetime(
+        df["created_at"],
+        errors="coerce",
+    )
+
+    total_events = len(df)
+
+    successful_logins = len(
+        df[df["action"] == "Login successful"]
+    )
+
+    failed_logins = len(
+        df[df["action"] == "Login failed"]
+    )
+
+    today = pd.Timestamp.now().date()
+
+    todays_events = len(
+        df[df["created_at"].dt.date == today]
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        kpi(
+            "Total Events",
+            total_events,
+            "All recorded audit events",
+        )
+
+    with c2:
+        kpi(
+            "Successful Logins",
+            successful_logins,
+            "Successful authentication events",
+        )
+
+    with c3:
+        kpi(
+            "Failed Logins",
+            failed_logins,
+            "Rejected authentication attempts",
+        )
+
+    with c4:
+        kpi(
+            "Today's Events",
+            todays_events,
+            "Events recorded today",
+        )
+
+    search_col, user_col, action_col, status_col = st.columns(
+        [2, 1, 1, 1]
+    )
+
+    search = search_col.text_input(
+        "Search audit trail",
+        placeholder="Email, resource, action or IP address",
+    )
+
+    users = [
+        "All",
+        *sorted(
+            df["user_email"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        ),
+    ]
+
+    selected_user = user_col.selectbox(
+        "User",
+        users,
+    )
+
+    actions = [
+        "All",
+        *sorted(
+            df["action"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        ),
+    ]
+
+    selected_action = action_col.selectbox(
+        "Action",
+        actions,
+    )
+
+    selected_status = status_col.selectbox(
+        "Status",
+        ["All", "Success", "Failed"],
+    )
+
+    filtered = df.copy()
+
+    if search:
+        token = search.lower().strip()
+
+        filtered = filtered[
+            filtered["user_email"]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.contains(token)
+            |
+            filtered["resource"]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.contains(token)
+            |
+            filtered["action"]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.contains(token)
+            |
+            filtered["ip_address"]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.contains(token)
+        ]
+
+    if selected_user != "All":
+        filtered = filtered[
+            filtered["user_email"] == selected_user
+        ]
+
+    if selected_action != "All":
+        filtered = filtered[
+            filtered["action"] == selected_action
+        ]
+
+    if selected_status == "Success":
+        filtered = filtered[
+            filtered["status_code"] < 400
+        ]
+
+    elif selected_status == "Failed":
+        filtered = filtered[
+            filtered["status_code"] >= 400
+        ]
+
+    chart_col, export_col = st.columns([3, 1])
+
+    with chart_col:
+        st.subheader("Events by action")
+
+        action_counts = (
+            filtered["action"]
+            .value_counts()
+            .rename_axis("Action")
+            .reset_index(name="Events")
+        )
+
+        if not action_counts.empty:
+            fig = px.bar(
+                action_counts,
+                x="Action",
+                y="Events",
+                text_auto=True,
+            )
+
+            fig.update_layout(
+                height=320,
+                margin=dict(
+                    l=10,
+                    r=10,
+                    t=20,
+                    b=10,
+                ),
+            )
+
+            st.plotly_chart(
+                fig,
+                width="stretch",
+            )
+
+    display_df = filtered.copy()
+
+    display_df["Status"] = display_df[
+        "status_code"
+    ].apply(
+        lambda value: (
+            "🟢 Success"
+            if int(value) < 400
+            else "🔴 Failed"
+        )
+    )
+
+    display_df = display_df.rename(
+        columns={
+            "created_at": "Time",
+            "user_email": "User",
+            "action": "Action",
+            "resource": "Resource",
+            "method": "Method",
+            "ip_address": "IP",
+        }
+    )
+
+    display_df = display_df[
+        [
+            "Time",
+            "User",
+            "Action",
+            "Resource",
+            "Method",
+            "Status",
+            "IP",
+        ]
+    ]
+
+    display_df = display_df.sort_values(
+        by="Time",
+        ascending=False,
+    )
+
+    with export_col:
+        csv_data = display_df.to_csv(
+            index=False
+        ).encode("utf-8")
+
+        st.download_button(
+            "⬇ Export CSV",
+            data=csv_data,
+            file_name="audit_trail.csv",
+            mime="text/csv",
+            width="stretch",
+        )
+
+        st.metric(
+            "Filtered Events",
+            len(display_df),
+        )
+
+    st.subheader("Audit events")
+
+    if display_df.empty:
+        st.info("No audit events match the selected filters.")
+    else:
+        st.dataframe(
+            display_df,
+            width="stretch",
+            hide_index=True,
+        )
+
+
+
+def reports_center_page() -> None:
+    page_header(
+        "Reports Center",
+        "Generate management-ready PDF reports and consolidated Excel workbooks.",
+    )
+
+    current_user = st.session_state.get("current_user") or {}
+    generated_by = current_user.get("full_name") or current_user.get("email") or "Authorized user"
+
+    management = api_get("/management/dashboard") or {}
+    compliance = api_get("/compliance/dashboard") or {}
+    compliance_summary = api_get("/compliance/summary") or {}
+    risks = api_get("/risks") or []
+    controls = api_get("/controls") or []
+    assessments = api_get("/compliance-assessments") or []
+    audits = api_get("/audits") or []
+    findings = api_get("/audit-findings") or []
+    actions = api_get("/corrective-actions") or []
+    incidents = api_get("/incidents") or []
+    evidence = api_get("/evidence") or []
+
+    summary_cols = st.columns(4)
+    with summary_cols[0]:
+        kpi("Available Reports", 6, "PDF report templates")
+    with summary_cols[1]:
+        kpi("Risks", len(risks), "Risk-register records")
+    with summary_cols[2]:
+        kpi("Controls", len(controls), "ISO control records")
+    with summary_cols[3]:
+        kpi("Generated By", generated_by, "Authenticated report owner")
+
+    management_summary = [
+        ("Total assets", management.get("total_assets", 0)),
+        ("Total risks", management.get("total_risks", len(risks))),
+        ("Critical risks", management.get("critical_risks", 0)),
+        ("Compliance percentage", f"{management.get('compliance_percentage', 0):.2f}%"),
+        ("Open incidents", management.get("open_incidents", 0)),
+        ("Open audit findings", management.get("open_audit_findings", 0)),
+        ("Overdue corrective actions", management.get("overdue_corrective_actions", 0)),
+    ]
+
+    reports = [
+        {
+            "title": "Executive Management Report",
+            "description": "Executive overview of risk, compliance, incidents, findings and remediation.",
+            "file_name": "cyber_x_force_executive_management_report.pdf",
+            "summary": management_summary,
+            "sections": [
+                ("Risk Register", risks),
+                ("ISO Controls", controls),
+                ("Audit Findings", findings),
+                ("Corrective Actions", actions),
+                ("Incidents", incidents),
+            ],
+        },
+        {
+            "title": "Risk Register Report",
+            "description": "Detailed risk register with inherent and residual risk information.",
+            "file_name": "cyber_x_force_risk_register_report.pdf",
+            "summary": [
+                ("Total risks", len(risks)),
+                ("Critical risks", sum(item.get("inherent_level") == "Critical" for item in risks)),
+                ("High risks", sum(item.get("inherent_level") == "High" for item in risks)),
+                ("Open risks", sum(item.get("status") != "Closed" for item in risks)),
+            ],
+            "sections": [("Risk Register", risks)],
+        },
+        {
+            "title": "ISO 27001 Compliance Report",
+            "description": "Control implementation, compliance assessments and overdue-control status.",
+            "file_name": "cyber_x_force_iso27001_compliance_report.pdf",
+            "summary": [
+                ("Total controls", compliance_summary.get("total_controls", len(controls))),
+                ("Implemented controls", compliance_summary.get("implemented", 0)),
+                ("Compliance percentage", f"{compliance_summary.get('overall_compliance_percentage', 0):.2f}%"),
+                ("Average progress", f"{compliance_summary.get('average_implementation_percentage', 0):.2f}%"),
+                ("Assessments", len(assessments)),
+            ],
+            "sections": [
+                ("ISO Controls", controls),
+                ("Compliance Assessments", assessments),
+            ],
+        },
+        {
+            "title": "Audit and Findings Report",
+            "description": "Audit programme, audit findings, related evidence and remediation status.",
+            "file_name": "cyber_x_force_audit_findings_report.pdf",
+            "summary": [
+                ("Audits", len(audits)),
+                ("Audit findings", len(findings)),
+                ("Open findings", sum(item.get("status") not in {"Closed", "Verified"} for item in findings)),
+                ("Evidence records", len(evidence)),
+                ("Corrective actions", len(actions)),
+            ],
+            "sections": [
+                ("Audits", audits),
+                ("Audit Findings", findings),
+                ("Corrective Actions", actions),
+                ("Evidence Register", evidence),
+            ],
+        },
+        {
+            "title": "Incident Summary Report",
+            "description": "Security incident register with severity, status and ownership information.",
+            "file_name": "cyber_x_force_incident_summary_report.pdf",
+            "summary": [
+                ("Total incidents", len(incidents)),
+                ("Open incidents", sum(item.get("status") != "Closed" for item in incidents)),
+                ("Critical incidents", sum(item.get("severity") == "Critical" for item in incidents)),
+                ("High incidents", sum(item.get("severity") == "High" for item in incidents)),
+            ],
+            "sections": [("Incidents", incidents)],
+        },
+        {
+            "title": "Corrective Action Report",
+            "description": "Remediation actions, ownership, due dates and completion status.",
+            "file_name": "cyber_x_force_corrective_action_report.pdf",
+            "summary": [
+                ("Total actions", len(actions)),
+                ("Open actions", sum(item.get("status") == "Open" for item in actions)),
+                ("In-progress actions", sum(item.get("status") == "In Progress" for item in actions)),
+                ("Completed or verified", sum(item.get("status") in {"Completed", "Verified"} for item in actions)),
+            ],
+            "sections": [
+                ("Corrective Actions", actions),
+                ("Audit Findings", findings),
+            ],
+        },
+    ]
+
+    st.subheader("PDF reports")
+    report_columns = st.columns(2)
+    for index, report in enumerate(reports):
+        with report_columns[index % 2]:
+            st.markdown(
+                f"""
+                <div class="section-card">
+                    <h3>{report['title']}</h3>
+                    <span style="opacity:.72">{report['description']}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            pdf_data = build_pdf_report(
+                report["title"],
+                report["description"],
+                report["summary"],
+                report["sections"],
+                generated_by,
+            )
+            st.download_button(
+                f"Download {report['title']}",
+                data=pdf_data,
+                file_name=report["file_name"],
+                mime="application/pdf",
+                key=f"pdf-report-{index}",
+                width="stretch",
+            )
+
+    st.subheader("Management workbook")
+    excel_download_button(
+        "Download consolidated Excel workbook",
+        "cyber_x_force_management_reporting.xlsx",
+        {
+            "Management Summary": [management],
+            "Compliance Summary": [compliance_summary],
+            "Risks": risks,
+            "ISO Controls": controls,
+            "Assessments": assessments,
+            "Audits": audits,
+            "Audit Findings": findings,
+            "Corrective Actions": actions,
+            "Incidents": incidents,
+            "Evidence": evidence,
+        },
+        "Cyber_X_Force Management Reporting Workbook",
+        "reports-center-workbook",
+    )
+
+    with st.expander("Report metadata"):
+        st.json(
+            {
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+                "generated_by": generated_by,
+                "application": "Cyber_X_Force",
+                "framework": "ISO/IEC 27001",
+                "api_base_url": API_BASE_URL,
+            }
+        )
 
 
 PAGES = {
@@ -1705,6 +2661,7 @@ PAGES = {
     "🧰 Corrective Actions": actions_page,
     "🚨 Incidents": incidents_page,
     "⚙️ System Status": system_status_page,
+    "📊 Reports Center": reports_center_page,
 }
 
 
@@ -1712,9 +2669,9 @@ ROLE_PAGES = {
     "Administrator": list(PAGES) + ["👥 User Administration", "📜 Audit Trail"],
     "Risk Manager": ["🏠 Dashboard", "🗂️ Assets", "⚠️ Risk Register", "🛡️ ISO Controls", "✅ Compliance", "📁 Evidence", "⚙️ System Status"],
     "Asset Owner": ["🏠 Dashboard", "🗂️ Assets", "⚠️ Risk Register", "🛡️ ISO Controls", "📁 Evidence"],
-    "Internal Auditor": ["🏠 Dashboard", "🛡️ ISO Controls", "✅ Compliance", "📁 Evidence", "🔎 Audits and Findings", "🧰 Corrective Actions", "📜 Audit Trail"],
+    "Internal Auditor": ["🏠 Dashboard", "🛡️ ISO Controls", "✅ Compliance", "📁 Evidence", "🔎 Audits and Findings", "🧰 Corrective Actions", "📜 Audit Trail", "📊 Reports Center"],
     "Incident Manager": ["🏠 Dashboard", "🗂️ Assets", "⚠️ Risk Register", "🧰 Corrective Actions", "🚨 Incidents", "📁 Evidence"],
-    "Executive Viewer": ["🏠 Dashboard", "✅ Compliance", "⚙️ System Status"],
+    "Executive Viewer": ["🏠 Dashboard", "✅ Compliance", "⚙️ System Status", "📊 Reports Center"],
 }
 EXTRA_PAGES = {"👥 User Administration": user_administration_page, "📜 Audit Trail": audit_trail_page}
 ALL_PAGES = PAGES | EXTRA_PAGES
