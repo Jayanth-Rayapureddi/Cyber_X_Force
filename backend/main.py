@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Annotated
 from pathlib import Path
 from uuid import uuid4
@@ -6,7 +7,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Response, status, UploadFile, File, Form
 from fastapi.responses import FileResponse
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -1249,6 +1250,78 @@ def list_incident_actions(incident_id:int,db:DatabaseSession):
 def create_incident_action(data:schemas.IncidentActionCreate,db:DatabaseSession):
     if crud.get_incident(db,data.incident_id) is None: raise HTTPException(status_code=400,detail="Selected incident does not exist.")
     return crud.create_incident_action(db,data)
+
+
+
+
+@app.get("/management/system-status", tags=["Management Dashboard"])
+def management_system_status(db: DatabaseSession) -> dict[str, object]:
+    """Return operational health, database record counts and evidence-storage metrics."""
+    try:
+        db.execute(text("SELECT 1"))
+        database_status = "connected"
+    except SQLAlchemyError:
+        database_status = "disconnected"
+
+    model_counts = {
+        "assets": models.Asset,
+        "risks": models.RiskAssessment,
+        "controls": models.Control,
+        "evidence": models.Evidence,
+        "audits": models.Audit,
+        "findings": models.AuditFinding,
+        "corrective_actions": models.CorrectiveAction,
+        "incidents": models.Incident,
+    }
+
+    record_counts = {
+        name: int(
+            db.scalar(
+                select(func.count()).select_from(model)
+            )
+            or 0
+        )
+        for name, model in model_counts.items()
+    }
+
+    upload_folder_exists = EVIDENCE_UPLOAD_DIR.exists()
+    evidence_files = [
+        path
+        for path in EVIDENCE_UPLOAD_DIR.iterdir()
+        if path.is_file()
+    ] if upload_folder_exists else []
+
+    storage_bytes = sum(
+        path.stat().st_size
+        for path in evidence_files
+    )
+
+    return {
+        "application": "Cyber_X_Force",
+        "backend_status": "healthy",
+        "database_status": database_status,
+        "version": app.version,
+        "server_time_utc": datetime.now(timezone.utc).isoformat(),
+        "record_counts": record_counts,
+        "storage": {
+            "upload_folder": str(EVIDENCE_UPLOAD_DIR),
+            "upload_folder_exists": upload_folder_exists,
+            "upload_folder_writable": (
+                upload_folder_exists
+                and EVIDENCE_UPLOAD_DIR.is_dir()
+            ),
+            "stored_files": len(evidence_files),
+            "storage_bytes": storage_bytes,
+        },
+        "checks": {
+            "api_responding": True,
+            "database_responding": database_status == "connected",
+            "upload_folder_accessible": upload_folder_exists,
+            "iso_controls_loaded": record_counts["controls"] > 0,
+            "assets_loaded": record_counts["assets"] > 0,
+            "risks_loaded": record_counts["risks"] > 0,
+        },
+    }
 
 
 @app.get("/management/dashboard",response_model=schemas.ManagementDashboardResponse,tags=["Management Dashboard"])

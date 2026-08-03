@@ -228,7 +228,7 @@ def show_table(
     if frame.empty:
         st.info(empty_message)
         return
-    st.dataframe(frame, use_container_width=True, hide_index=True)
+    st.dataframe(frame, width="stretch", hide_index=True)
 
 
 def kpi(label: str, value: Any, note: str = "") -> None:
@@ -322,7 +322,7 @@ def dashboard_page() -> None:
                 category_orders={"level": ["Low", "Medium", "High", "Critical"]},
             )
             fig.update_layout(height=340, margin=dict(l=10, r=10, t=20, b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("No risk data is available.")
 
@@ -338,7 +338,7 @@ def dashboard_page() -> None:
             )
         )
         gauge.update_layout(height=340, margin=dict(l=25, r=25, t=15, b=10))
-        st.plotly_chart(gauge, use_container_width=True)
+        st.plotly_chart(gauge, width="stretch")
 
     left, right = st.columns(2)
     with left:
@@ -352,7 +352,7 @@ def dashboard_page() -> None:
                 hole=0.52,
             )
             fig.update_layout(height=340, margin=dict(l=10, r=10, t=20, b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("No control-status data is available.")
 
@@ -367,7 +367,7 @@ def dashboard_page() -> None:
         )
         fig = px.bar(workload, x="area", y="count", text_auto=True)
         fig.update_layout(height=340, margin=dict(l=10, r=10, t=20, b=10))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     st.subheader("Top overdue controls")
     overdue = (compliance or {}).get("top_overdue_controls", [])
@@ -463,7 +463,7 @@ def assets_page() -> None:
                 "Department",
                 list(department_options) if department_options else ["No department available"],
             )
-            submitted = st.form_submit_button("Create asset", use_container_width=True)
+            submitted = st.form_submit_button("Create asset", width="stretch")
 
         if submitted:
             if not department_options:
@@ -505,7 +505,7 @@ def risk_heatmap(risks: list[dict[str, Any]]) -> None:
         aspect="auto",
     )
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=20, b=10))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def risks_page() -> None:
@@ -641,7 +641,7 @@ def compliance_page() -> None:
         value = float(summary.get("overall_compliance_percentage", 0))
         fig = go.Figure(go.Indicator(mode="gauge+number", value=value, number={"suffix": "%"}, gauge={"axis": {"range": [0, 100]}}))
         fig.update_layout(height=320, margin=dict(l=20, r=20, t=20, b=10))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     with right:
         st.subheader("Assessment status")
         if assessments:
@@ -649,7 +649,7 @@ def compliance_page() -> None:
             distribution = frame["compliance_status"].value_counts().rename_axis("status").reset_index(name="count")
             fig = px.pie(distribution, names="status", values="count", hole=0.5)
             fig.update_layout(height=320, margin=dict(l=20, r=20, t=20, b=10))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         else:
             st.info("No assessments have been recorded.")
 
@@ -680,7 +680,7 @@ def compliance_page() -> None:
             recommendations = st.text_area("Recommendations")
             evidence_reference = st.text_input("Evidence reference")
             next_review = st.date_input("Next review date", value=date.today())
-            submitted = st.form_submit_button("Create assessment", use_container_width=True)
+            submitted = st.form_submit_button("Create assessment", width="stretch")
         if submitted and control_options:
             created = api_post(
                 "/compliance-assessments",
@@ -740,7 +740,7 @@ def evidence_page() -> None:
             valid_until = c2.date_input("Valid until", value=date.today(), disabled=not has_expiry)
             is_verified = st.checkbox("Verified")
             verification_notes = st.text_area("Verification notes")
-            submitted = st.form_submit_button("Upload evidence", use_container_width=True)
+            submitted = st.form_submit_button("Upload evidence", width="stretch")
         if submitted:
             if uploaded_file is None:
                 st.error("Select a file before uploading.")
@@ -778,9 +778,9 @@ def evidence_page() -> None:
             downloaded = download_evidence_file(item["id"])
             if downloaded:
                 content, filename = downloaded
-                st.download_button("⬇ Download", data=content, file_name=filename, key=f"download-{item['id']}", use_container_width=True)
+                st.download_button("⬇ Download", data=content, file_name=filename, key=f"download-{item['id']}", width="stretch")
         with right:
-            if st.button("🗑 Delete", key=f"delete-{item['id']}", use_container_width=True):
+            if st.button("🗑 Delete", key=f"delete-{item['id']}", width="stretch"):
                 if api_delete(f"/evidence/{item['id']}"):
                     st.success("Evidence deleted.")
                     st.rerun()
@@ -809,7 +809,7 @@ def audits_page() -> None:
                 end_date = c2.date_input("Planned end", value=date.today())
                 status_value = st.selectbox("Status", ["Planned", "In Progress", "Completed", "Cancelled"])
                 summary = st.text_area("Summary")
-                submitted = st.form_submit_button("Create audit", use_container_width=True)
+                submitted = st.form_submit_button("Create audit", width="stretch")
             if submitted:
                 created = api_post(
                     "/audits",
@@ -858,7 +858,7 @@ def audits_page() -> None:
                 owner = c1.text_input("Owner")
                 due_date = c2.date_input("Due date", value=date.today())
                 status_value = st.selectbox("Status", ["Open", "Under Review", "Remediation", "Verified", "Closed"])
-                submitted = st.form_submit_button("Create finding", use_container_width=True)
+                submitted = st.form_submit_button("Create finding", width="stretch")
             if submitted and audit_options:
                 created = api_post(
                     "/audit-findings",
@@ -907,7 +907,7 @@ def actions_page() -> None:
             status_value = c1.selectbox("Status", ["Open", "In Progress", "Completed", "Verified", "Cancelled"])
             completion = c2.slider("Completion percentage", 0, 100, 0)
             verification = st.text_area("Verification result")
-            submitted = st.form_submit_button("Create corrective action", use_container_width=True)
+            submitted = st.form_submit_button("Create corrective action", width="stretch")
         if submitted and finding_options:
             created = api_post(
                 "/corrective-actions",
@@ -985,7 +985,7 @@ def incidents_page() -> None:
                 "Status",
                 ["Reported", "Triaged", "Investigating", "Contained", "Recovered", "Closed"],
             )
-            submitted = st.form_submit_button("Create incident", use_container_width=True)
+            submitted = st.form_submit_button("Create incident", width="stretch")
         if submitted:
             created = api_post(
                 "/incidents",
@@ -1045,21 +1045,151 @@ def incidents_page() -> None:
     )
 
 
+
+def human_file_size(size_bytes: int) -> str:
+    value = float(size_bytes)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} GB"
+
+
 def system_status_page() -> None:
-    page_header("System Status", "Verify application and database connectivity.")
+    page_header(
+        "System Status",
+        "Monitor platform health, database connectivity, module data and evidence storage.",
+    )
+
+    refresh_col, timestamp_col = st.columns([1, 4])
+    with refresh_col:
+        if st.button("🔄 Refresh status", width="stretch"):
+            st.rerun()
+
+    status_data = api_get("/management/system-status")
     health = api_get("/health")
     root = api_get("/")
 
-    cols = st.columns(3)
-    with cols[0]:
-        kpi("Application", (root or {}).get("application", "Unavailable"), (root or {}).get("status", "unknown"))
-    with cols[1]:
-        kpi("Database", (health or {}).get("database", "Unavailable"), (health or {}).get("status", "unknown"))
-    with cols[2]:
-        kpi("Version", (root or {}).get("version", "Unknown"), API_BASE_URL)
+    if not status_data:
+        st.error("System-status information could not be loaded.")
+        return
+
+    counts = status_data.get("record_counts", {})
+    storage = status_data.get("storage", {})
+    checks = status_data.get("checks", {})
+
+    with timestamp_col:
+        st.caption(
+            "Last refreshed from server: "
+            f"{status_data.get('server_time_utc', 'Unknown')}"
+        )
+
+    st.subheader("Service health")
+    service_cols = st.columns(4)
+    with service_cols[0]:
+        kpi(
+            "Backend API",
+            "Healthy" if status_data.get("backend_status") == "healthy" else "Unavailable",
+            "FastAPI service",
+        )
+    with service_cols[1]:
+        kpi(
+            "Database",
+            "Connected" if status_data.get("database_status") == "connected" else "Disconnected",
+            "PostgreSQL connectivity",
+        )
+    with service_cols[2]:
+        kpi(
+            "Frontend",
+            "Running",
+            "Streamlit application",
+        )
+    with service_cols[3]:
+        kpi(
+            "Version",
+            status_data.get("version", (root or {}).get("version", "Unknown")),
+            API_BASE_URL,
+        )
+
+    st.subheader("Module records")
+    first_row = st.columns(4)
+    with first_row[0]:
+        kpi("Assets", counts.get("assets", 0), "Registered information assets")
+    with first_row[1]:
+        kpi("Risks", counts.get("risks", 0), "Risk assessments")
+    with first_row[2]:
+        kpi("ISO Controls", counts.get("controls", 0), "Control-library records")
+    with first_row[3]:
+        kpi("Evidence", counts.get("evidence", 0), "Evidence metadata records")
+
+    second_row = st.columns(4)
+    with second_row[0]:
+        kpi("Audits", counts.get("audits", 0), "Audit engagements")
+    with second_row[1]:
+        kpi("Findings", counts.get("findings", 0), "Audit findings")
+    with second_row[2]:
+        kpi(
+            "Corrective Actions",
+            counts.get("corrective_actions", 0),
+            "Remediation actions",
+        )
+    with second_row[3]:
+        kpi("Incidents", counts.get("incidents", 0), "Security incidents")
+
+    st.subheader("Evidence storage")
+    storage_cols = st.columns(4)
+    with storage_cols[0]:
+        kpi(
+            "Upload Folder",
+            "Available" if storage.get("upload_folder_exists") else "Missing",
+            storage.get("upload_folder", "/uploads/evidence"),
+        )
+    with storage_cols[1]:
+        kpi(
+            "Folder Access",
+            "Accessible" if storage.get("upload_folder_writable") else "Unavailable",
+            "Evidence persistence directory",
+        )
+    with storage_cols[2]:
+        kpi(
+            "Stored Files",
+            storage.get("stored_files", 0),
+            "Physical evidence files",
+        )
+    with storage_cols[3]:
+        kpi(
+            "Storage Used",
+            human_file_size(int(storage.get("storage_bytes", 0))),
+            "Current evidence-file storage",
+        )
+
+    st.subheader("Operational checks")
+    check_labels = {
+        "api_responding": "API responding",
+        "database_responding": "Database responding",
+        "upload_folder_accessible": "Upload folder accessible",
+        "iso_controls_loaded": "ISO controls loaded",
+        "assets_loaded": "Assets loaded",
+        "risks_loaded": "Risks loaded",
+    }
+    check_columns = st.columns(3)
+    for index, (key, label) in enumerate(check_labels.items()):
+        passed = bool(checks.get(key))
+        with check_columns[index % 3]:
+            if passed:
+                st.success(f"✓ {label}")
+            else:
+                st.warning(f"⚠ {label}")
 
     with st.expander("Technical response"):
-        st.json({"api_base_url": API_BASE_URL, "application": root, "health": health})
+        st.json(
+            {
+                "api_base_url": API_BASE_URL,
+                "application": root,
+                "health": health,
+                "system_status": status_data,
+            }
+        )
 
 
 PAGES = {
