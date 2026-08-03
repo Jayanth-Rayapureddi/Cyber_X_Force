@@ -1689,9 +1689,270 @@ def user_administration_page() -> None:
 
 
 def audit_trail_page() -> None:
-    page_header("Audit Trail", "Review authentication events and changes made through the API.")
+    page_header(
+        "Audit Trail",
+        "Review authentication events and changes made through the API.",
+    )
+
     logs = api_get("/audit-logs") or []
-    show_table(logs, ["created_at", "user_email", "action", "resource", "method", "status_code", "ip_address"], "No audit events recorded.")
+
+    if not logs:
+        st.info("No audit events have been recorded.")
+        return
+
+    df = pd.DataFrame(logs)
+
+    df["created_at"] = pd.to_datetime(
+        df["created_at"],
+        errors="coerce",
+    )
+
+    total_events = len(df)
+
+    successful_logins = len(
+        df[df["action"] == "Login successful"]
+    )
+
+    failed_logins = len(
+        df[df["action"] == "Login failed"]
+    )
+
+    today = pd.Timestamp.now().date()
+
+    todays_events = len(
+        df[df["created_at"].dt.date == today]
+    )
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    with c1:
+        kpi(
+            "Total Events",
+            total_events,
+            "All recorded audit events",
+        )
+
+    with c2:
+        kpi(
+            "Successful Logins",
+            successful_logins,
+            "Successful authentication events",
+        )
+
+    with c3:
+        kpi(
+            "Failed Logins",
+            failed_logins,
+            "Rejected authentication attempts",
+        )
+
+    with c4:
+        kpi(
+            "Today's Events",
+            todays_events,
+            "Events recorded today",
+        )
+
+    search_col, user_col, action_col, status_col = st.columns(
+        [2, 1, 1, 1]
+    )
+
+    search = search_col.text_input(
+        "Search audit trail",
+        placeholder="Email, resource, action or IP address",
+    )
+
+    users = [
+        "All",
+        *sorted(
+            df["user_email"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        ),
+    ]
+
+    selected_user = user_col.selectbox(
+        "User",
+        users,
+    )
+
+    actions = [
+        "All",
+        *sorted(
+            df["action"]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        ),
+    ]
+
+    selected_action = action_col.selectbox(
+        "Action",
+        actions,
+    )
+
+    selected_status = status_col.selectbox(
+        "Status",
+        ["All", "Success", "Failed"],
+    )
+
+    filtered = df.copy()
+
+    if search:
+        token = search.lower().strip()
+
+        filtered = filtered[
+            filtered["user_email"]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.contains(token)
+            |
+            filtered["resource"]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.contains(token)
+            |
+            filtered["action"]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.contains(token)
+            |
+            filtered["ip_address"]
+            .fillna("")
+            .astype(str)
+            .str.lower()
+            .str.contains(token)
+        ]
+
+    if selected_user != "All":
+        filtered = filtered[
+            filtered["user_email"] == selected_user
+        ]
+
+    if selected_action != "All":
+        filtered = filtered[
+            filtered["action"] == selected_action
+        ]
+
+    if selected_status == "Success":
+        filtered = filtered[
+            filtered["status_code"] < 400
+        ]
+
+    elif selected_status == "Failed":
+        filtered = filtered[
+            filtered["status_code"] >= 400
+        ]
+
+    chart_col, export_col = st.columns([3, 1])
+
+    with chart_col:
+        st.subheader("Events by action")
+
+        action_counts = (
+            filtered["action"]
+            .value_counts()
+            .rename_axis("Action")
+            .reset_index(name="Events")
+        )
+
+        if not action_counts.empty:
+            fig = px.bar(
+                action_counts,
+                x="Action",
+                y="Events",
+                text_auto=True,
+            )
+
+            fig.update_layout(
+                height=320,
+                margin=dict(
+                    l=10,
+                    r=10,
+                    t=20,
+                    b=10,
+                ),
+            )
+
+            st.plotly_chart(
+                fig,
+                width="stretch",
+            )
+
+    display_df = filtered.copy()
+
+    display_df["Status"] = display_df[
+        "status_code"
+    ].apply(
+        lambda value: (
+            "🟢 Success"
+            if int(value) < 400
+            else "🔴 Failed"
+        )
+    )
+
+    display_df = display_df.rename(
+        columns={
+            "created_at": "Time",
+            "user_email": "User",
+            "action": "Action",
+            "resource": "Resource",
+            "method": "Method",
+            "ip_address": "IP",
+        }
+    )
+
+    display_df = display_df[
+        [
+            "Time",
+            "User",
+            "Action",
+            "Resource",
+            "Method",
+            "Status",
+            "IP",
+        ]
+    ]
+
+    display_df = display_df.sort_values(
+        by="Time",
+        ascending=False,
+    )
+
+    with export_col:
+        csv_data = display_df.to_csv(
+            index=False
+        ).encode("utf-8")
+
+        st.download_button(
+            "⬇ Export CSV",
+            data=csv_data,
+            file_name="audit_trail.csv",
+            mime="text/csv",
+            width="stretch",
+        )
+
+        st.metric(
+            "Filtered Events",
+            len(display_df),
+        )
+
+    st.subheader("Audit events")
+
+    if display_df.empty:
+        st.info("No audit events match the selected filters.")
+    else:
+        st.dataframe(
+            display_df,
+            width="stretch",
+            hide_index=True,
+        )
 
 
 PAGES = {
